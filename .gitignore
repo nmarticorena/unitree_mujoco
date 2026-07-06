@@ -3,4 +3,6 @@
 **/__pycache__/
 **/log/
 **/install/
-simulate/mujoco
+simulate/mujoco# pixi environments
+.pixi/*
+!.pixi/config.toml

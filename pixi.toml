@@ -1,0 +1,21 @@
+[workspace]
+authors = ["nmarticorena <nicolas.marticorena.vidal@gmail.com>"]
+channels = ["conda-forge", "nmarticorena"]
+name = "unitree_mujoco"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+yaml-cpp = ">=0.8.0,<0.9"
+spdlog = ">=1.17.0,<2"
+boost-cpp = ">=1.85.0,<2"
+glfw = ">=3.4,<4"
+cyclonedds = {channel = "nmarticorena"}
+cyclonedds-py = {channel = "nmarticorena"}
+unitree_sdk2 = ">=2.0.2,<3"
+mujoco = ">=3.10.0,<4"
+compilers = ">=1.11.0,<2"
+cmake = ">=4.3.4,<5"
+libmujoco = ">=3.10.0,<4"
