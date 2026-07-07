@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<mujocoinclude>
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" contype="1" conaffinity="1" mass="0"/>
+    </default>
+  </default>
+  <asset>
+    <mesh name="dolly_mesh" file="dolly.obj" scale="0.5 0.5 0.5"/>
+    <texture name="dolly_tex" type="2d" file="Material.007.png"/>
+    <material name="dolly_mat" texture="dolly_tex" texuniform="true"/>
+  </asset>
+  <custom>
+    <!-- Handle layout constants. Keep the literal handle fromto coordinates below
+         in sync with these values until the model has a preprocessing step. -->
+    <numeric name="dolly_handle_x_distance" data="0"/>
+    <numeric name="dolly_handle_y_distance" data="0"/>
+  </custom>
+</mujocoinclude>

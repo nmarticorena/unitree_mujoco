@@ -1,6 +1,6 @@
 <mujoco model="g1_29dof scene with dolly">
   <include file="g1_29dof.xml"/>
-  <include file="dolly/dolly.xml"/>
+  <include file="dolly/dolly_assets.xml"/>
 
   <statistic center="0 0 0.5" extent="2.0"/>
 
@@ -20,6 +20,10 @@
 
 
   <worldbody>
+    <body name="dolly" pos="0.5 0.0 0.45" euler="0 0 0">
+      <include file="dolly/dolly_body.xml"/>
+    </body>
+
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
   </worldbody>
