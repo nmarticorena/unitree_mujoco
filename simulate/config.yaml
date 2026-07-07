@@ -1,5 +1,5 @@
 robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1", "h2"
-robot_scene: "scene.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
+robot_scene: "dolly_scene.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
 
 domain_id: 1  # Domain id
 interface: "lo" # Interface 
@@ -12,3 +12,9 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 print_scene_information: 1 # Print link, joint and sensors information of robot
 
 enable_elastic_band: 1 # Virtual spring band, used for lifting h1
+
+publish_object_pose: 1 # Publish a MuJoCo body pose through DDS as geometry_msgs/msg/PoseStamped
+object_pose_body: "dolly" # MuJoCo body name, e.g. "dolly" when using g1/dolly_scene.xml
+object_pose_topic: "rt/object_pose" # DDS topic name
+object_pose_frame: "world" # PoseStamped header frame_id
+object_pose_rate_hz: 50 # Publish rate

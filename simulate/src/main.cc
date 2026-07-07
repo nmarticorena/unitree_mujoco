@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,9 @@
 #include <thread>
 
 #include <mujoco/mujoco.h>
+#include <unitree/common/thread/recurrent_thread.hpp>
+#include <unitree/idl/ros2/PoseStamped_.hpp>
+#include <unitree/robot/channel/channel_publisher.hpp>
 #include "simulate.h"
 #include "array_safety.h"
 #include "unitree_sdk2_bridge.h"
@@ -84,6 +88,90 @@ public:
   std::vector<double> f_ = {0, 0, 0};
 };
 inline ElasticBand elastic_band;
+
+class ObjectPosePublisher
+{
+public:
+  using PoseStamped_t = geometry_msgs::msg::dds_::PoseStamped_;
+
+  ObjectPosePublisher(mjModel *model, mjData *data)
+      : mj_model_(model),
+        mj_data_(data),
+        publisher_(param::config.object_pose_topic)
+  {
+    body_id_ = mj_name2id(mj_model_, mjOBJ_BODY, param::config.object_pose_body.c_str());
+    if (body_id_ < 0)
+    {
+      std::cerr << "Object pose publisher disabled: MuJoCo body '"
+                << param::config.object_pose_body << "' was not found" << std::endl;
+      return;
+    }
+
+    if (param::config.object_pose_rate_hz <= 0)
+    {
+      std::cerr << "Object pose publisher disabled: object_pose_rate_hz must be positive" << std::endl;
+      return;
+    }
+
+    publisher_.InitChannel();
+    enabled_ = true;
+    std::cout << "Publishing MuJoCo body pose '" << param::config.object_pose_body
+              << "' on DDS topic '" << param::config.object_pose_topic << "'" << std::endl;
+  }
+
+  void start()
+  {
+    if (!enabled_)
+    {
+      return;
+    }
+
+    int period_us = 1000000 / param::config.object_pose_rate_hz;
+    if (period_us < 1)
+    {
+      period_us = 1;
+    }
+    thread_ = std::make_shared<unitree::common::RecurrentThread>(
+        "object_pose_pub", UT_CPU_ID_NONE, period_us, [this]() { this->publish(); });
+  }
+
+private:
+  void publish()
+  {
+    if (!mj_data_)
+    {
+      return;
+    }
+
+    const mjtNum *position = mj_data_->xpos + 3 * body_id_;
+    const mjtNum *quaternion = mj_data_->xquat + 4 * body_id_;
+    const double sim_time = mj_data_->time;
+    const double sec_double = std::floor(sim_time);
+    const auto sec = static_cast<int32_t>(sec_double);
+    const auto nanosec = static_cast<uint32_t>((sim_time - sec_double) * 1e9);
+
+    PoseStamped_t msg;
+    msg.header().stamp().sec(sec);
+    msg.header().stamp().nanosec(nanosec);
+    msg.header().frame_id(param::config.object_pose_frame);
+    msg.pose().position().x(position[0]);
+    msg.pose().position().y(position[1]);
+    msg.pose().position().z(position[2]);
+    msg.pose().orientation().w(quaternion[0]);
+    msg.pose().orientation().x(quaternion[1]);
+    msg.pose().orientation().y(quaternion[2]);
+    msg.pose().orientation().z(quaternion[3]);
+
+    publisher_.Write(msg);
+  }
+
+  mjModel *mj_model_ = nullptr;
+  mjData *mj_data_ = nullptr;
+  int body_id_ = -1;
+  bool enabled_ = false;
+  unitree::robot::ChannelPublisher<PoseStamped_t> publisher_;
+  unitree::common::RecurrentThreadPtr thread_;
+};
 
 
 namespace
@@ -586,6 +674,12 @@ void *UnitreeSdk2BridgeThread(void *arg)
 
   unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
 
+  std::unique_ptr<ObjectPosePublisher> object_pose_publisher = nullptr;
+  if (param::config.publish_object_pose == 1)
+  {
+    object_pose_publisher = std::make_unique<ObjectPosePublisher>(m, d);
+    object_pose_publisher->start();
+  }
 
   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
   if (body_id < 0) {

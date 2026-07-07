@@ -26,6 +26,12 @@ inline struct SimulationConfig
     int enable_elastic_band;
     int band_attached_link = 0;
 
+    int publish_object_pose = 0;
+    std::string object_pose_body = "dolly";
+    std::string object_pose_topic = "rt/object_pose";
+    std::string object_pose_frame = "world";
+    int object_pose_rate_hz = 50;
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -41,6 +47,21 @@ inline struct SimulationConfig
             joystick_bits = cfg["joystick_bits"].as<int>();
             print_scene_information = cfg["print_scene_information"].as<int>();
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
+            if (cfg["publish_object_pose"]) {
+                publish_object_pose = cfg["publish_object_pose"].as<int>();
+            }
+            if (cfg["object_pose_body"]) {
+                object_pose_body = cfg["object_pose_body"].as<std::string>();
+            }
+            if (cfg["object_pose_topic"]) {
+                object_pose_topic = cfg["object_pose_topic"].as<std::string>();
+            }
+            if (cfg["object_pose_frame"]) {
+                object_pose_frame = cfg["object_pose_frame"].as<std::string>();
+            }
+            if (cfg["object_pose_rate_hz"]) {
+                object_pose_rate_hz = cfg["object_pose_rate_hz"].as<int>();
+            }
         }
         catch(const std::exception& e)
         {
@@ -63,6 +84,11 @@ inline po::variables_map helper(int argc, char** argv)
         ("network,n", po::value<std::string>(&config.interface), "DDS network interface; -n eth0")
         ("robot,r", po::value<std::string>(&config.robot), "Robot type; -r go2")
         ("scene,s", po::value<std::filesystem::path>(&config.robot_scene), "Robot scene file; -s scene_terrain.xml")
+        ("publish_object_pose", po::value<int>(&config.publish_object_pose), "Publish a MuJoCo body pose over DDS; 0 or 1")
+        ("object_pose_body", po::value<std::string>(&config.object_pose_body), "MuJoCo body name to publish")
+        ("object_pose_topic", po::value<std::string>(&config.object_pose_topic), "DDS topic for the object PoseStamped")
+        ("object_pose_frame", po::value<std::string>(&config.object_pose_frame), "Frame id for the object PoseStamped")
+        ("object_pose_rate_hz", po::value<int>(&config.object_pose_rate_hz), "Object pose publishing rate in Hz")
     ;
 
     po::variables_map vm;
