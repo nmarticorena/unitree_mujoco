@@ -178,7 +178,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lodepng-20220109-h924138e_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/linux-64/markupsafe-3.0.3-py311h3778330_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mkl-2026.0.0-hecca717_915.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/ml_dtypes-0.5.4-np2py311h912ec1f_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpc-1.4.0-he0a73b1_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mpfr-4.2.2-he0a73b1_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/mujoco-3.10.0-h1f9ada4_0.conda
@@ -194,8 +193,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-2.3.4-hb03c661_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/onednn-3.12-omp_h83de36e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/onemkl-license-2026.0.0-ha770c72_915.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/onnx-1.22.0-py311hd30d403_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/onnxruntime-1.26.0-py311h4b8f324_200_cuda130.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/onnxruntime-cpp-1.26.0-h5187751_200_cuda130.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-hecca717_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.3-h35e630c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/optree-0.19.1-py311hdf67eae_0.conda
@@ -2739,20 +2738,6 @@ packages:
   run_exports: {}
   size: 143201396
   timestamp: 1781016571972
-- conda: https://conda.anaconda.org/conda-forge/linux-64/ml_dtypes-0.5.4-np2py311h912ec1f_1.conda
-  sha256: 0b9b24d1d6da203729d75c74c531a632e965d0a5a973da964b666637948f5a0b
-  md5: 81be6dcbed9f37c8afb78c2e24de3fe4
-  depends:
-  - python
-  - __glibc >=2.17,<3.0.a0
-  - libgcc >=14
-  - libstdcxx >=14
-  - numpy >=1.23,<3
-  - python_abi 3.11.* *_cp311
-  license: MPL-2.0 AND Apache-2.0
-  run_exports: {}
-  size: 345364
-  timestamp: 1771362487210
 - conda: https://conda.anaconda.org/conda-forge/linux-64/mpc-1.4.0-he0a73b1_0.conda
   sha256: c1fdeebc9f8e4f51df265efca4ea20c7a13911193cc255db73cccb6e422ae486
   md5: 770d00bf57b5599c4544d61b61d8c6c6
@@ -3017,24 +3002,6 @@ packages:
   run_exports: {}
   size: 39966
   timestamp: 1781016460562
-- conda: https://conda.anaconda.org/conda-forge/linux-64/onnx-1.22.0-py311hd30d403_0.conda
-  sha256: 1f975d18865443e855954e9218ef6a0f0d8662fc5065e55b7ecc9a3a3f3762a4
-  md5: f5f1e3e69585a54850e38f87778452dc
-  depends:
-  - python
-  - ml_dtypes
-  - protobuf
-  - typing_extensions
-  - libgcc >=14
-  - libstdcxx >=14
-  - __glibc >=2.17,<3.0.a0
-  - libprotobuf >=6.33.5,<6.33.6.0a0
-  - python_abi 3.11.* *_cp311
-  license: Apache-2.0
-  license_family: APACHE
-  run_exports: {}
-  size: 12637749
-  timestamp: 1781615977893
 - conda: https://conda.anaconda.org/conda-forge/linux-64/onnxruntime-1.26.0-py311h4b8f324_200_cuda130.conda
   build_number: 200
   sha256: 63ba3e13a8e2f86dfcff6fbff804c733a9aca044990b4415e530444f8d756ab5
@@ -3062,6 +3029,22 @@ packages:
   run_exports: {}
   size: 163778844
   timestamp: 1778969561676
+- conda: https://conda.anaconda.org/conda-forge/linux-64/onnxruntime-cpp-1.26.0-h5187751_200_cuda130.conda
+  build_number: 200
+  sha256: 387599b751057ecd2f48f85af49f8b27c376eeb821c26a498320b6fe5e8bc9fc
+  md5: c04964a81cca4866514a5ca1fc07cd1b
+  depends:
+  - __cuda
+  - __glibc >=2.28,<3.0.a0
+  - cuda-version >=13.0,<14
+  - libgcc >=14
+  - libstdcxx >=14
+  license: MIT AND BSL-1.0
+  run_exports:
+    weak:
+    - onnxruntime-cpp >=1.26.0,<1.26.1.0a0
+  size: 168419738
+  timestamp: 1778969618035
 - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-hecca717_0.conda
   sha256: 8de2f0cd8a659b01abf86e7fbb8cea4f28ada62fd288429a2bbc040db1b98dd0
   md5: c930c8052d780caa41216af7de472226
