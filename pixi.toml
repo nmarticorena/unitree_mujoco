@@ -6,6 +6,8 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+build_sim = {cmd = "cmake -S simulate -B simulate/build && cmake --build simulate/build", inputs = ["simulate/src"]}
+sim = {cmd = "./simulate/build/unitree_mujoco", depends-on = ["build_sim"]}
 
 [dependencies]
 yaml-cpp = ">=0.8.0,<0.9"
