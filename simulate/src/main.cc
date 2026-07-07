@@ -94,29 +94,35 @@ class ObjectPosePublisher
 public:
   using PoseStamped_t = geometry_msgs::msg::dds_::PoseStamped_;
 
-  ObjectPosePublisher(mjModel *model, mjData *data)
+  ObjectPosePublisher(mjModel *model, mjData *data, const param::ObjectPoseConfig &config)
       : mj_model_(model),
         mj_data_(data),
-        publisher_(param::config.object_pose_topic)
+        config_(config),
+        publisher_(config_.topic)
   {
-    body_id_ = mj_name2id(mj_model_, mjOBJ_BODY, param::config.object_pose_body.c_str());
+    body_id_ = mj_name2id(mj_model_, mjOBJ_BODY, config_.body.c_str());
     if (body_id_ < 0)
     {
       std::cerr << "Object pose publisher disabled: MuJoCo body '"
-                << param::config.object_pose_body << "' was not found" << std::endl;
+                << config_.body << "' was not found" << std::endl;
       return;
     }
 
-    if (param::config.object_pose_rate_hz <= 0)
+    if (config_.rate_hz <= 0)
     {
-      std::cerr << "Object pose publisher disabled: object_pose_rate_hz must be positive" << std::endl;
+      std::cerr << "Object pose publisher disabled for body '" << config_.body
+                << "': rate_hz must be positive" << std::endl;
       return;
     }
 
     publisher_.InitChannel();
     enabled_ = true;
-    std::cout << "Publishing MuJoCo body pose '" << param::config.object_pose_body
-              << "' on DDS topic '" << param::config.object_pose_topic << "'" << std::endl;
+    std::cout << "Publishing MuJoCo body pose '" << config_.body
+              << "' on DDS topic '" << config_.topic
+              << "' initial position ["
+              << mj_data_->xpos[3 * body_id_ + 0] << ", "
+              << mj_data_->xpos[3 * body_id_ + 1] << ", "
+              << mj_data_->xpos[3 * body_id_ + 2] << "]" << std::endl;
   }
 
   void start()
@@ -126,13 +132,14 @@ public:
       return;
     }
 
-    int period_us = 1000000 / param::config.object_pose_rate_hz;
+    int period_us = 1000000 / config_.rate_hz;
     if (period_us < 1)
     {
       period_us = 1;
     }
+    const std::string thread_name = "object_pose_pub_" + config_.body;
     thread_ = std::make_shared<unitree::common::RecurrentThread>(
-        "object_pose_pub", UT_CPU_ID_NONE, period_us, [this]() { this->publish(); });
+        thread_name, UT_CPU_ID_NONE, period_us, [this]() { this->publish(); });
   }
 
 private:
@@ -153,7 +160,7 @@ private:
     PoseStamped_t msg;
     msg.header().stamp().sec(sec);
     msg.header().stamp().nanosec(nanosec);
-    msg.header().frame_id(param::config.object_pose_frame);
+    msg.header().frame_id(config_.frame);
     msg.pose().position().x(position[0]);
     msg.pose().position().y(position[1]);
     msg.pose().position().z(position[2]);
@@ -167,6 +174,7 @@ private:
 
   mjModel *mj_model_ = nullptr;
   mjData *mj_data_ = nullptr;
+  param::ObjectPoseConfig config_;
   int body_id_ = -1;
   bool enabled_ = false;
   unitree::robot::ChannelPublisher<PoseStamped_t> publisher_;
@@ -674,11 +682,25 @@ void *UnitreeSdk2BridgeThread(void *arg)
 
   unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
 
-  std::unique_ptr<ObjectPosePublisher> object_pose_publisher = nullptr;
+  std::vector<std::unique_ptr<ObjectPosePublisher>> object_pose_publishers;
   if (param::config.publish_object_pose == 1)
   {
-    object_pose_publisher = std::make_unique<ObjectPosePublisher>(m, d);
-    object_pose_publisher->start();
+    std::vector<param::ObjectPoseConfig> pose_configs = param::config.object_pose_publishers;
+    if (pose_configs.empty())
+    {
+      pose_configs.push_back({
+          param::config.object_pose_body,
+          param::config.object_pose_topic,
+          param::config.object_pose_frame,
+          param::config.object_pose_rate_hz});
+    }
+
+    for (const auto &pose_config : pose_configs)
+    {
+      auto publisher = std::make_unique<ObjectPosePublisher>(m, d, pose_config);
+      publisher->start();
+      object_pose_publishers.push_back(std::move(publisher));
+    }
   }
 
   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");

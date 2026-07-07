@@ -4,9 +4,18 @@
 #include <boost/program_options.hpp>
 #include <yaml-cpp/yaml.h>
 #include <filesystem>
+#include <vector>
 
 namespace param
 {
+
+struct ObjectPoseConfig
+{
+    std::string body;
+    std::string topic;
+    std::string frame;
+    int rate_hz;
+};
 
 inline struct SimulationConfig
 {
@@ -31,6 +40,7 @@ inline struct SimulationConfig
     std::string object_pose_topic = "rt/object_pose";
     std::string object_pose_frame = "world";
     int object_pose_rate_hz = 50;
+    std::vector<ObjectPoseConfig> object_pose_publishers;
 
     void load_from_yaml(const std::string &filename)
     {
@@ -61,6 +71,17 @@ inline struct SimulationConfig
             }
             if (cfg["object_pose_rate_hz"]) {
                 object_pose_rate_hz = cfg["object_pose_rate_hz"].as<int>();
+            }
+            if (cfg["object_pose_publishers"]) {
+                object_pose_publishers.clear();
+                for (const auto& node : cfg["object_pose_publishers"]) {
+                    ObjectPoseConfig pose;
+                    pose.body = node["body"].as<std::string>();
+                    pose.topic = node["topic"] ? node["topic"].as<std::string>() : "rt/" + pose.body + "_pose";
+                    pose.frame = node["frame"] ? node["frame"].as<std::string>() : object_pose_frame;
+                    pose.rate_hz = node["rate_hz"] ? node["rate_hz"].as<int>() : object_pose_rate_hz;
+                    object_pose_publishers.push_back(pose);
+                }
             }
         }
         catch(const std::exception& e)
