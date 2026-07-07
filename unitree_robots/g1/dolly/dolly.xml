@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<mujocoinclude>
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" contype="1" conaffinity="1" mass="0"/>
+    </default>
+  </default>
+  <asset>
+    <mesh name="dolly" file="dolly.obj" scale="0.5 0.5 0.5"/>
+    <texture name="dolly_tex" type="2d" file="Material.007.png"/>
+    <material name="dolly_mat" texture="dolly_tex" texuniform="true"/>
+  </asset>
+  <custom>
+    <!-- Handle layout constants. Keep the literal handle fromto coordinates below
+         in sync with these values until the model has a preprocessing step. -->
+    <numeric name="dolly_handle_x_distance" data="0"/>
+    <numeric name="dolly_handle_y_distance" data="0"/>
+  </custom>
+  <worldbody>
+    <body name="dolly" pos="0 0 0.45">
+      <!-- <freejoint name="dolly_free"/> -->
+      <joint name="box_x" type="slide" axis="1 0 0" damping="0.1" frictionloss="10"/>
+      <joint name="box_y" type="slide" axis="0 1 0" damping="0.1" frictionloss="10"/>
+      <joint name="box_yaw" type="hinge" axis="0 0 1" damping="0.05" frictionloss="5"/>
+      <geom rgba="1 1 1 1" mesh="dolly" material="dolly_mat" class="visual" quat="0.7071068 0.7071068 0 0"/>
+      <!-- Bottom -->
+      <geom name="dolly_bottom_box_collision" type="box" class="collision" pos="0 0 -0.3" size="0.5 0.32 0.15" mass="3"/>
+
+      <!-- Handles -->
+      <!-- front handle -->
+      <geom name="dolly_front_handle_collision_left" type="capsule" class="collision" fromto="0.4 0.13 -0.3  0.4 0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+      <geom name="dolly_front_handle_collision_right" type="capsule" class="collision" fromto="0.4 -0.13 -0.3  0.4 -0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+      <geom name="dolly_front_handle_collision_top" type="capsule" class="collision" fromto="0.45 -0.13 0.45  0.45 0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+
+
+
+      <geom name="dolly_back_handle_collision_left" type="capsule" class="collision" fromto="-0.4 0.13 -0.3  -0.4 0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+      <geom name="dolly_back_handle_collision_right" type="capsule" class="collision" fromto="-0.4 -0.13 -0.3  -0.4 -0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+      <geom name="dolly_back_handle_collision_top" type="capsule" class="collision" fromto="-0.45 -0.13 0.45  -0.45 0.13 0.45" size="0.03" rgba="0.2 0.2 0.2 1"/>
+    </body>
+  </worldbody>
+</mujocoinclude>
