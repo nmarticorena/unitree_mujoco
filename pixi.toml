@@ -5,6 +5,9 @@ name = "unitree_mujoco"
 platforms = ["linux-64"]
 version = "0.1.0"
 
+[system-requirements]
+cuda="13.0"
+
 [tasks]
 build_sim = {cmd = "cmake -S simulate -B simulate/build && cmake --build simulate/build", inputs = ["simulate/src"]}
 sim = {cmd = "./simulate/build/unitree_mujoco", depends-on = ["build_sim"]}
@@ -18,10 +21,14 @@ cyclonedds = {channel = "nmarticorena"}
 cyclonedds-py = {channel = "nmarticorena"}
 unitree_sdk2 = ">=2.0.2,<3"
 compilers = ">=1.11.0,<2"
-cmake = ">=4.3.4,<5"
+cmake = ">=4.2.3,<5"
 # libmujoco = ">=3.10.0,<4"
 eigen = ">=5.0.1,<6"
 mujoco-warp = ">=3.10.0.1,<4"
 rich = ">=15.0.0,<16"
 iceoryx = ">=2.95.8,<3"
 libxml2 = ">=2.15.1,<3"
+pytorch-gpu = ">=2.12.0,<3"
+cuda = "13.0.*"
+onnx = ">=1.22.0,<2"
+onnxruntime = ">=1.26.0,<2"
