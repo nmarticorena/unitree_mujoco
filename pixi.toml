@@ -15,7 +15,10 @@ glfw = ">=3.4,<4"
 cyclonedds = {channel = "nmarticorena"}
 cyclonedds-py = {channel = "nmarticorena"}
 unitree_sdk2 = ">=2.0.2,<3"
-mujoco = ">=3.10.0,<4"
 compilers = ">=1.11.0,<2"
 cmake = ">=4.3.4,<5"
-libmujoco = ">=3.10.0,<4"
+# libmujoco = ">=3.10.0,<4"
+eigen = ">=5.0.1,<6"
+mujoco-warp = ">=3.10.0.1,<4"
+rich = ">=15.0.0,<16"
+iceoryx = ">=2.95.8,<3"
