@@ -24,6 +24,18 @@ using namespace unitree::robot;
 
 const int G1_NUM_MOTOR = 29;
 
+constexpr int NUM_OBS = 91;
+constexpr int NUM_OBS_HISTORY = 10;
+constexpr int NUM_STACKED_OBS = NUM_OBS * NUM_OBS_HISTORY;
+
+constexpr int NUM_ACTIONS = 12;
+constexpr int NUM_OBS_JOINTS = 26;
+constexpr int ACTION_DELAY = 5;
+
+constexpr float OBS_CLIP = 100.0f;
+constexpr float ACTION_CLIP = 100.0f;
+constexpr float ACTION_SCALE = 0.25f;
+
 
 
 // Stiffness for all G1 Joints
@@ -87,6 +99,58 @@ enum G1JointIndex {
   RightWristYaw = 28     // NOTE INVALID for g1 23dof
 };
 
+const std::array<int, NUM_ACTIONS> action_motor_indices = {
+    LeftHipPitch,
+    RightHipPitch,
+    LeftHipRoll,
+    RightHipRoll,
+    LeftHipYaw,
+    RightHipYaw,
+    LeftKnee,
+    RightKnee,
+    LeftAnklePitch,
+    RightAnklePitch,
+    LeftAnkleRoll,
+    RightAnkleRoll
+};
+
+const std::array<int, 26> obs_motor_indices = {
+    // Legs, in policy observation order
+    LeftHipPitch,
+    RightHipPitch,
+    LeftHipRoll,
+    RightHipRoll,
+    LeftHipYaw,
+    RightHipYaw,
+    LeftKnee,
+    RightKnee,
+    LeftAnklePitch,
+    RightAnklePitch,
+    LeftAnkleRoll,
+    RightAnkleRoll,
+
+    // Arms
+    LeftShoulderPitch,
+    LeftShoulderRoll,
+    LeftShoulderYaw,
+    LeftElbow,
+    LeftWristRoll,
+    LeftWristPitch,
+    LeftWristYaw,
+
+    RightShoulderPitch,
+    RightShoulderRoll,
+    RightShoulderYaw,
+    RightElbow,
+    RightWristRoll,
+    RightWristPitch,
+    RightWristYaw
+};
+
+std::array<float, G1_NUM_MOTOR> default_q_{
+    // legs
+    };
+
 struct MotorCommand {
   std::array<float, G1_NUM_MOTOR> q_target = {};
   std::array<float, G1_NUM_MOTOR> dq_target = {};
@@ -105,6 +169,9 @@ struct PolicyBuffers {
         10
     };
 
+    boost::circular_buffer<std::array<float, 29>> action_delay_buffer{
+        29
+    };
 
     std::array<float, 910> stacked_obs{};
     std::array<float, 12> raw_action{};
@@ -113,22 +180,6 @@ struct PolicyBuffers {
     std::array<float, 29> target_q{};
 };
 
-bool buildStackedObservation(PolicyBuffers& buffers)
-{
-    if (buffers.obs_history.size() < 10) {
-        return false;
-    }
-
-    size_t k = 0;
-
-    for (const auto& obs : buffers.obs_history) {
-        for (float x : obs) {
-            buffers.stacked_obs[k++] = x;
-        }
-    }
-
-    return true;
-}
 
 float clip(float x, float lo, float hi) {
     return std::max(lo, std::min(x, hi));
@@ -193,6 +244,9 @@ private:
     std::array<float, 3> gyro_{0.0f, 0.0f, 0.0f};
     Eigen::Quaterniond imu_quaternion_{1.0, 0.0, 0.0, 0.0};
     std::array<float, 3> projected_gravity_{0.0f, 0.0f, 0.0f};
+
+    std::array<float, G1_NUM_MOTOR> default_q_{};
+    std::array<float, G1_NUM_MOTOR> default_dq_{};
     
     
     /*publisher*/
@@ -208,8 +262,115 @@ private:
     std::atomic<bool> low_state_received_{false};
 
     std::mutex imu_state_mutex_;
-    // std::atomic<bool> imu_state_received_{false};
 };
+
+void LocomotionPolicyController::update()
+{
+    if (!low_state_received_) {
+        return;
+    }
+
+    copyLowStateToMotorState();
+
+    buildCurrentObservation();
+
+    policy_buffers_.obs_history.push_back(policy_buffers_.current_obs);
+
+    if (!buildStackedObservation()) {
+        return;
+    }
+
+    runPolicy();
+    postProcessAction();
+    publishCommand();
+}
+
+void LocomotionPolicyController::publishCommand()
+{
+    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+        low_cmd.motor_cmd()[i].mode() = 0x01;
+        low_cmd.motor_cmd()[i].q() = policy_buffers_.target_q[i];
+        low_cmd.motor_cmd()[i].dq() = 0.0f;
+        low_cmd.motor_cmd()[i].kp() = Kp[i];
+        low_cmd.motor_cmd()[i].kd() = Kd[i];
+        low_cmd.motor_cmd()[i].tau() = 0.0f;
+    }
+
+    lowcmd_publisher->Write(low_cmd);
+}
+
+void LocomotionPolicyController::runPolicy()
+{
+    Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+        OrtArenaAllocator,
+        OrtMemTypeDefault
+    );
+
+    std::array<int64_t, 2> input_shape{1, NUM_STACKED_OBS};
+
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        memory_info,
+        policy_buffers_.stacked_obs.data(),
+        policy_buffers_.stacked_obs.size(),
+        input_shape.data(),
+        input_shape.size()
+    );
+
+    const char* input_names[] = {"obs"};
+    const char* output_names[] = {"actions"};
+
+    auto output_tensors = session_.Run(
+        Ort::RunOptions{nullptr},
+        input_names,
+        &input_tensor,
+        1,
+        output_names,
+        1
+    );
+
+    float* output_data = output_tensors.front().GetTensorMutableData<float>();
+
+    for (int i = 0; i < NUM_ACTIONS; ++i) {
+        policy_buffers_.raw_action[i] = output_data[i];
+    }
+}
+
+void LocomotionPolicyController::postProcessAction()
+{
+    policy_buffers_.full_action.fill(0.0f);
+
+    // Insert 12 policy actions into 29-DoF action vector.
+    for (int i = 0; i < NUM_ACTIONS; ++i) {
+        const int motor_idx = action_motor_indices[i];
+        policy_buffers_.full_action[motor_idx] = policy_buffers_.raw_action[i];
+    }
+
+    // Add to delay buffer.
+    policy_buffers_.action_delay_buffer.push_back(policy_buffers_.full_action);
+
+    if (policy_buffers_.action_delay_buffer.size() < ACTION_DELAY) {
+        policy_buffers_.delayed_action = policy_buffers_.full_action;
+    } else {
+        policy_buffers_.delayed_action =
+            policy_buffers_.action_delay_buffer.front();
+    }
+
+    // Convert normalized action to joint targets.
+    policy_buffers_.target_q = default_q_;
+
+    for (int i = 0; i < NUM_ACTIONS; ++i) {
+        const int motor_idx = action_motor_indices[i];
+
+        float action = clip(
+            policy_buffers_.delayed_action[motor_idx],
+            -ACTION_CLIP,
+            ACTION_CLIP
+        );
+
+        policy_buffers_.target_q[motor_idx] =
+            default_q_[motor_idx] + ACTION_SCALE * action;
+    }
+}
 
 LocomotionPolicyController::LocomotionPolicyController(
     std::string model_path,
@@ -239,7 +400,7 @@ void LocomotionPolicyController::init()
     imustate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::IMUMessageHandler, this, std::placeholders::_1), 1);
 
     /*loop publishing thread*/
-    // lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt * 1000000), &Custom::LowCmdWrite, this);
+    // lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::LowCmdWrite, this);
 }
 
 void LocomotionPolicyController::LoadONNX(){
@@ -281,7 +442,6 @@ void LocomotionPolicyController::LowStateMessageHandler(const void *message)
 
 void LocomotionPolicyController::IMUMessageHandler(const void *message)
 {
-    std::cout << "IMU message received." << std::endl;
     auto imu = (const unitree_hg::msg::dds_::IMUState_*)message;
     {
         std::lock_guard<std::mutex> lock(imu_state_mutex_);
@@ -294,7 +454,7 @@ void LocomotionPolicyController::IMUMessageHandler(const void *message)
         imu_quaternion_.y() = imu->quaternion()[2];
         imu_quaternion_.z() = imu->quaternion()[3];
 
-        Eigen::Vector3d gravity(0.0, 0.0, -9.81);
+        Eigen::Vector3d gravity(0.0, 0.0, -1.0);
         Eigen::Matrix3d rotation_matrix = imu_quaternion_.toRotationMatrix();
 
         Eigen::Vector3d projected_gravity = rotation_matrix.transpose() * gravity;
@@ -302,13 +462,7 @@ void LocomotionPolicyController::IMUMessageHandler(const void *message)
         projected_gravity_[1] = projected_gravity[1];
         projected_gravity_[2] = projected_gravity[2];
 
-        // projected_gravity_[0] = imu->projected_gravity()[0];
-        // projected_gravity_[1] = imu->projected_gravity()[1];
-        // projected_gravity_[2] = imu->projected_gravity()[2];
     }
-    std::cout << "IMU received: gyro = [" << gyro_[0] << ", " << gyro_[1] << ", " << gyro_[2] << "]" << std::endl;
-    std::cout << "IMU received: projected_gravity = [" << projected_gravity_[0] << ", " << projected_gravity_[1] << ", " << projected_gravity_[2] << "]" << std::endl;
-
 }
 
 
@@ -342,23 +496,23 @@ void LocomotionPolicyController::buildCurrentObservation()
         policy_buffers_.current_obs[k++] = command_[i];
     }
 
-    // for (int motor_idx : obs_motor_indices) {
-    //     policy_buffers_.current_obs[k++] =
-    //         motor_state_.q[motor_idx] - default_q_[motor_idx];
-    // }
+    for (int motor_idx : obs_motor_indices) {
+        policy_buffers_.current_obs[k++] =
+            motor_state_.q[motor_idx] - default_q_[motor_idx];
+    }
+
+    for (int motor_idx : obs_motor_indices) {
+        policy_buffers_.current_obs[k++] =
+            motor_state_.dq[motor_idx] - default_dq_[motor_idx];
+    }
     //
-    // for (int motor_idx : obs_motor_indices) {
-    //     policy_buffers_.current_obs[k++] =
-    //         motor_state_.dq[motor_idx] - default_dq_[motor_idx];
-    // }
-    //
-    // for (int i = 0; i < G1_NUM_MOTOR; ++i) {
-    //     policy_buffers_.current_obs[k++] = policy_.delayed_action[i];
-    // }
-    //
-    // if (k != 910) {
-    //     throw std::runtime_error("Observation size mismatch");
-    // }
+    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+        policy_buffers_.current_obs[k++] = policy_buffers_.delayed_action[i];
+    }
+
+    if (k != 91) {
+        throw std::runtime_error("Observation size mismatch");
+    }
 
     for (float& x : policy_buffers_.current_obs) {
         x = clip(x, -100.0f, 100.0f);
@@ -431,9 +585,10 @@ int main(int argc, const char **argv)
     LocomotionPolicyController controller;
     controller.init();
 
-    while (1)
+    while (true)
     {
-        sleep(10);
+        controller.update();
+        usleep(20000);  // 50 Hz
     }
 
     return 0;
