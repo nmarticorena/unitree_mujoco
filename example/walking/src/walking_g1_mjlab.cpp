@@ -1,10 +1,18 @@
 #include <onnxruntime/core/session/onnxruntime_cxx_api.h>
-#include <string>
 #include <boost/circular_buffer.hpp>
 #include <Eigen/Dense>
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <functional>
 #include <iostream>
-#include <stdint.h>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <unistd.h>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
@@ -27,38 +35,46 @@ constexpr int NUM_OBS = 99;
 constexpr int NUM_OBS_HISTORY = 1;
 constexpr int NUM_STACKED_OBS = NUM_OBS * NUM_OBS_HISTORY;
 
-constexpr int NUM_ACTIONS = 29;
-constexpr int NUM_OBS_JOINTS = 29;
+constexpr int NUM_ACTIONS = G1_NUM_MOTOR;
+constexpr int NUM_POLICY_JOINTS = G1_NUM_MOTOR;
 constexpr int DEFAULT_POSE_RAMP_STEPS = 100;
 constexpr int POLICY_WARMUP_STEPS = 20;
+static_assert(NUM_ACTIONS == NUM_POLICY_JOINTS);
+static_assert(NUM_OBS == 3 + 3 + 3 + 3 * NUM_POLICY_JOINTS + 3);
 
-constexpr float OBS_CLIP = 100.0f;
-constexpr float ACTION_CLIP = 100.0f;
-constexpr float ACTION_SCALE = 0.25f;
+constexpr float ACTION_SCALE_5020 = 0.4385773139f;
+constexpr float ACTION_SCALE_7520_14 = 0.5475464630f;
+constexpr float ACTION_SCALE_7520_22 = 0.3506614664f;
+constexpr float ACTION_SCALE_4010 = 0.0745008703f;
 
+constexpr float KP_5020 = 14.2506231f;
+constexpr float KP_7520_14 = 40.1792386f;
+constexpr float KP_7520_22 = 99.0984278f;
+constexpr float KP_4010 = 16.7783275f;
+constexpr float KP_5020_PARALLEL = 28.5012462f;
 
+constexpr float KD_5020 = 0.90722284f;
+constexpr float KD_7520_14 = 2.55788978f;
+constexpr float KD_7520_22 = 6.30880185f;
+constexpr float KD_4010 = 1.06814150f;
+constexpr float KD_5020_PARALLEL = 1.81444569f;
 
-// Stiffness for all G1 Joints
+// mjlab G1 actuator stiffness in DDS joint order.
 std::array<float, G1_NUM_MOTOR> Kp{
-    200, 150, 150, 200, 20, 20,      // left leg
-    200, 150, 150, 200, 20, 20,      // right leg
-    200, 200, 200,                   // waist
-    100, 100, 50, 50, 40, 40, 40,    // left arm
-    100, 100, 50, 50, 40, 40, 40     // right arm
+    KP_7520_14, KP_7520_22, KP_7520_14, KP_7520_22, KP_5020_PARALLEL, KP_5020_PARALLEL,
+    KP_7520_14, KP_7520_22, KP_7520_14, KP_7520_22, KP_5020_PARALLEL, KP_5020_PARALLEL,
+    KP_7520_14, KP_5020_PARALLEL, KP_5020_PARALLEL,
+    KP_5020, KP_5020, KP_5020, KP_5020, KP_5020, KP_4010, KP_4010,
+    KP_5020, KP_5020, KP_5020, KP_5020, KP_5020, KP_4010, KP_4010
 };
 
-// Damping for all G1 Joints
+// mjlab G1 actuator damping in DDS joint order.
 std::array<float, G1_NUM_MOTOR> Kd{
-    5, 5, 5, 5, 2, 2,     // left leg
-    5, 5, 5, 5, 2, 2,     // right leg
-    5, 5, 5,              // waist
-    2, 2, 2, 2, 2, 2, 2,  // left arm
-    2, 2, 2, 2, 2, 2, 2   // right arm
-};
-
-enum class Mode {
-  PR = 0,  // Series Control for Ptich/Roll Joints
-  AB = 1   // Parallel Control for A/B Joints
+    KD_7520_14, KD_7520_22, KD_7520_14, KD_7520_22, KD_5020_PARALLEL, KD_5020_PARALLEL,
+    KD_7520_14, KD_7520_22, KD_7520_14, KD_7520_22, KD_5020_PARALLEL, KD_5020_PARALLEL,
+    KD_7520_14, KD_5020_PARALLEL, KD_5020_PARALLEL,
+    KD_5020, KD_5020, KD_5020, KD_5020, KD_5020, KD_4010, KD_4010,
+    KD_5020, KD_5020, KD_5020, KD_5020, KD_5020, KD_4010, KD_4010
 };
 
 enum G1JointIndex {
@@ -99,69 +115,7 @@ enum G1JointIndex {
   RightWristYaw = 28     // NOTE INVALID for g1 23dof
 };
 
-const std::array<int, NUM_ACTIONS> action_motor_indices = {
-    LeftHipPitch,
-    RightHipPitch,
-    LeftHipRoll,
-    RightHipRoll,
-    LeftHipYaw,
-    RightHipYaw,
-    LeftKnee,
-    RightKnee,
-    LeftAnklePitch,
-    RightAnklePitch,
-    LeftAnkleRoll,
-    RightAnkleRoll
-};
-
-const std::array<int, G1_NUM_MOTOR> old_action_motor_indices = {
-    LeftHipPitch,
-    RightHipPitch,
-    WaistYaw,
-    LeftHipRoll,
-    RightHipRoll,
-    WaistRoll,
-    LeftHipYaw,
-    RightHipYaw,
-    WaistPitch,
-    LeftKnee,
-    RightKnee,
-    LeftShoulderPitch,
-    RightShoulderPitch,
-    LeftAnklePitch,
-    RightAnklePitch,
-    LeftShoulderRoll,
-    RightShoulderRoll,
-    LeftAnkleRoll,
-    RightAnkleRoll,
-    LeftShoulderYaw,
-    RightShoulderYaw,
-    LeftElbow,
-    RightElbow,
-    LeftWristRoll,
-    RightWristRoll,
-    LeftWristPitch,
-    RightWristPitch,
-    LeftWristYaw,
-    RightWristYaw
-};
-
-const std::array<int, NUM_ACTIONS> action_old_order_indices = {
-    0,
-    1,
-    3,
-    4,
-    6,
-    7,
-    9,
-    10,
-    13,
-    14,
-    17,
-    18
-};
-
-const std::array<int, NUM_OBS_JOINTS> obs_motor_indices = {
+const std::array<int, NUM_POLICY_JOINTS> policy_motor_indices = {
     LeftHipPitch,
     LeftHipRoll,
     LeftHipYaw,
@@ -196,12 +150,49 @@ const std::array<int, NUM_OBS_JOINTS> obs_motor_indices = {
     RightWristPitch,
     RightWristYaw
 };
+
+const std::array<float, NUM_POLICY_JOINTS> action_scale = {
+    ACTION_SCALE_7520_14,
+    ACTION_SCALE_7520_22,
+    ACTION_SCALE_7520_14,
+    ACTION_SCALE_7520_22,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+
+    ACTION_SCALE_7520_14,
+    ACTION_SCALE_7520_22,
+    ACTION_SCALE_7520_14,
+    ACTION_SCALE_7520_22,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+
+    ACTION_SCALE_7520_14,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_4010,
+    ACTION_SCALE_4010,
+
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_5020,
+    ACTION_SCALE_4010,
+    ACTION_SCALE_4010
+};
+
 const std::array<float, G1_NUM_MOTOR> default_joint_positions{
-    -0.20f, 0.0f, 0.0f, 0.42f, -0.23f, 0.0f,
-    -0.20f, 0.0f, 0.0f, 0.42f, -0.23f, 0.0f,
+    -0.312f, 0.0f, 0.0f, 0.669f, -0.363f, 0.0f,
+    -0.312f, 0.0f, 0.0f, 0.669f, -0.363f, 0.0f,
     0.0f, 0.0f, 0.0f,
-    0.35f, 0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f,
-    0.35f, -0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f
+    0.2f, 0.2f, 0.0f, 0.6f, 0.0f, 0.0f, 0.0f,
+    0.2f, -0.2f, 0.0f, 0.6f, 0.0f, 0.0f, 0.0f
 };
 
 const std::array<float, G1_NUM_MOTOR> joint_position_min{
@@ -220,13 +211,6 @@ const std::array<float, G1_NUM_MOTOR> joint_position_max{
     2.6704f, 1.5882f, 2.618f, 2.0944f, 1.97222f, 1.61443f, 1.61443f
 };
 
-struct MotorCommand {
-  std::array<float, G1_NUM_MOTOR> q_target = {};
-  std::array<float, G1_NUM_MOTOR> dq_target = {};
-  std::array<float, G1_NUM_MOTOR> kp = {};
-  std::array<float, G1_NUM_MOTOR> kd = {};
-  std::array<float, G1_NUM_MOTOR> tau_ff = {};
-};
 struct MotorState {
   std::array<float, G1_NUM_MOTOR> q = {};
   std::array<float, G1_NUM_MOTOR> dq = {};
@@ -240,20 +224,13 @@ struct PolicyBuffers {
 
     std::array<float, NUM_STACKED_OBS> stacked_obs{};
     std::array<float, NUM_ACTIONS> raw_action{};
-    std::array<float, G1_NUM_MOTOR> full_action{};
-    std::array<float, G1_NUM_MOTOR> delayed_action{};
+    std::array<float, NUM_ACTIONS> previous_action{};
     std::array<float, G1_NUM_MOTOR> target_q{};
 };
 
 
 float clip(float x, float lo, float hi) {
     return std::max(lo, std::min(x, hi));
-}
-
-void clipArray(std::array<float, NUM_OBS>& obs) {
-    for (auto& x : obs) {
-        x = clip(x, -OBS_CLIP, OBS_CLIP);
-    }
 }
 
 class LocomotionPolicyController
@@ -265,7 +242,7 @@ public:
     );
 
     void init();
-    void setCommand(double vx, double vy, double wz); //); ///, double height);
+    void setCommand(double vx, double vy, double wz);
     void update();
     void publishCommand();
 
@@ -274,7 +251,6 @@ private:
     void LoadONNX();
     void LowStateMessageHandler(const void *messages);
     void SportModeMessageHandler(const void *messages);
-    void LowCmdWrite();
 
     void copyLowStateToMotorState();
     void buildCurrentObservation();
@@ -292,13 +268,12 @@ private:
 
     // Robot state
     MotorState motor_state_;
-    MotorCommand motor_cmd_;
     unitree_hg::msg::dds_::LowCmd_ low_cmd{};     // default init
     unitree_hg::msg::dds_::LowState_ low_state{}; // default init
     
 
     std::array<float, 3> command_{
-        0.0f, 0.0f, 0.0f 
+        1.0f, 0.0f, 0.0f 
     }; 
 
 
@@ -315,7 +290,6 @@ private:
 
 
     std::array<float, G1_NUM_MOTOR> default_q_{default_joint_positions};
-    std::array<float, G1_NUM_MOTOR> default_dq_{};
     std::array<float, G1_NUM_MOTOR> startup_q_{};
     int default_pose_ramp_step_{0};
     int policy_warmup_step_{0};
@@ -364,7 +338,7 @@ void LocomotionPolicyController::update()
         }
 
         policy_buffers_.obs_history.clear();
-        policy_buffers_.delayed_action.fill(0.0f);
+        policy_buffers_.previous_action.fill(0.0f);
         ++default_pose_ramp_step_;
         publishCommand();
         return;
@@ -444,37 +418,12 @@ void LocomotionPolicyController::runPolicy()
 
 void LocomotionPolicyController::postProcessAction()
 {
-    policy_buffers_.full_action.fill(0.0f);
-
-    // Insert policy actions into full action vector.
-    for (int i = 0; i < NUM_ACTIONS; ++i) {
-        const int motor_idx = action_motor_indices[i];
-        policy_buffers_.full_action[motor_idx] = policy_buffers_.raw_action[i];
-    }
-
-    std::array<float, G1_NUM_MOTOR> old_order_action{};
-    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
-        old_order_action[i] =
-            policy_buffers_.full_action[old_action_motor_indices[i]];
-    }
-
-    policy_buffers_.delayed_action = old_order_action;
-
-    // Convert normalized action to joint targets.
     policy_buffers_.target_q = default_q_;
 
     for (int i = 0; i < NUM_ACTIONS; ++i) {
-        const int motor_idx = action_motor_indices[i];
-        const int old_order_idx = action_old_order_indices[i];
-
-        float action = clip(
-            policy_buffers_.delayed_action[old_order_idx],
-            -ACTION_CLIP,
-            ACTION_CLIP
-        );
-
+        const int motor_idx = policy_motor_indices[i];
         policy_buffers_.target_q[motor_idx] =
-            default_q_[motor_idx] + ACTION_SCALE * action;
+            default_q_[motor_idx] + action_scale[i] * policy_buffers_.raw_action[i];
     }
 
     for (int i = 0; i < G1_NUM_MOTOR; ++i) {
@@ -484,6 +433,8 @@ void LocomotionPolicyController::postProcessAction()
             joint_position_max[i]
         );
     }
+
+    policy_buffers_.previous_action = policy_buffers_.raw_action;
 }
 
 LocomotionPolicyController::LocomotionPolicyController(
@@ -513,7 +464,15 @@ void LocomotionPolicyController::init()
     sportmode_subscriber->InitChannel(std::bind(&LocomotionPolicyController::SportModeMessageHandler, this, std::placeholders::_1), 1);
     
     /*loop publishing thread*/
-    lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::LowCmdWrite, this);
+    lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::update, this);
+}
+
+void LocomotionPolicyController::setCommand(double vx, double vy, double wz)
+{
+    std::lock_guard<std::mutex> lock(low_state_mutex_);
+    command_[0] = static_cast<float>(vx);
+    command_[1] = static_cast<float>(vy);
+    command_[2] = static_cast<float>(wz);
 }
 
 void LocomotionPolicyController::LoadONNX(){
@@ -584,9 +543,17 @@ void LocomotionPolicyController::copyLowStateToMotorState() {
 void LocomotionPolicyController::buildCurrentObservation()
 {
     int k = 0;
+    std::array<float, 3> velocity{};
+    std::array<float, 3> command{};
+
+    {
+        std::lock_guard<std::mutex> lock(low_state_mutex_);
+        velocity = velocity_;
+        command = command_;
+    }
 
     for (int i = 0; i < 3; ++i) {
-        policy_buffers_.current_obs[k++] = velocity_[i];
+        policy_buffers_.current_obs[k++] = velocity[i];
     }
     
     for (int i = 0; i < 3; ++i) {
@@ -597,37 +564,28 @@ void LocomotionPolicyController::buildCurrentObservation()
         policy_buffers_.current_obs[k++] = projected_gravity_[i];
     }
 
-    // 4. joint_pos_rel
-    for (int motor_idx : obs_motor_indices) {
+    for (int motor_idx : policy_motor_indices) {
         policy_buffers_.current_obs[k++] =
             motor_state_.q[motor_idx] - default_q_[motor_idx];
     }
 
-    // 5. joint_vel_rel
-    for (int motor_idx : obs_motor_indices) {
-        policy_buffers_.current_obs[k++] =
-            motor_state_.dq[motor_idx] - default_dq_[motor_idx];
+    for (int motor_idx : policy_motor_indices) {
+        policy_buffers_.current_obs[k++] = motor_state_.dq[motor_idx];
     }
 
-    // 6. last action, in the same 29-joint policy order
     for (int i = 0; i < NUM_ACTIONS; ++i) {
-        const int motor_idx = obs_motor_indices[i];
-        policy_buffers_.current_obs[k++] =
-            policy_buffers_.delayed_action[motor_idx];
+        policy_buffers_.current_obs[k++] = policy_buffers_.previous_action[i];
     }
 
 
     for (int i = 0; i < 3; ++i) {
-        policy_buffers_.current_obs[k++] = command_[i];
+        policy_buffers_.current_obs[k++] = command[i];
     }
     
     if (k != NUM_OBS) {
         throw std::runtime_error("Observation size mismatch");
     }
 
-    for (float& x : policy_buffers_.current_obs) {
-        x = clip(x, -OBS_CLIP, OBS_CLIP);
-    }
 }
 
 bool LocomotionPolicyController::buildStackedObservation(){
