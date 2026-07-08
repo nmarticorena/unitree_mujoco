@@ -20,7 +20,7 @@
 
 
   <worldbody>
-    <body name="dolly" pos="0.5 0.0 0.45" euler="0 0 0">
+    <body name="dolly" pos="0.8 0.0 0.45" euler="0 0 0">
       <include file="dolly/dolly_body.xml"/>
     </body>
 
