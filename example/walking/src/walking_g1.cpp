@@ -4,9 +4,7 @@
 #include <Eigen/Dense>
 
 #include <iostream>
-#include <stdio.h>
 #include <stdint.h>
-#include <math.h>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
@@ -20,7 +18,6 @@ using namespace unitree::robot;
 
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
-#define TOPIC_IMUSTATE "rt/secondary_imu"
 
 const int G1_NUM_MOTOR = 29;
 
@@ -30,7 +27,8 @@ constexpr int NUM_STACKED_OBS = NUM_OBS * NUM_OBS_HISTORY;
 
 constexpr int NUM_ACTIONS = 12;
 constexpr int NUM_OBS_JOINTS = 26;
-constexpr int ACTION_DELAY = 5;
+constexpr int DEFAULT_POSE_RAMP_STEPS = 100;
+constexpr int POLICY_WARMUP_STEPS = 20;
 
 constexpr float OBS_CLIP = 100.0f;
 constexpr float ACTION_CLIP = 100.0f;
@@ -40,20 +38,20 @@ constexpr float ACTION_SCALE = 0.25f;
 
 // Stiffness for all G1 Joints
 std::array<float, G1_NUM_MOTOR> Kp{
-    60, 60, 60, 100, 40, 40,      // legs
-    60, 60, 60, 100, 40, 40,      // legs
-    60, 40, 40,                   // waist
-    40, 40, 40, 40,  40, 40, 40,  // arms
-    40, 40, 40, 40,  40, 40, 40   // arms
+    200, 150, 150, 200, 20, 20,      // left leg
+    200, 150, 150, 200, 20, 20,      // right leg
+    200, 200, 200,                   // waist
+    100, 100, 50, 50, 40, 40, 40,    // left arm
+    100, 100, 50, 50, 40, 40, 40     // right arm
 };
 
 // Damping for all G1 Joints
 std::array<float, G1_NUM_MOTOR> Kd{
-    1, 1, 1, 2, 1, 1,     // legs
-    1, 1, 1, 2, 1, 1,     // legs
-    1, 1, 1,              // waist
-    1, 1, 1, 1, 1, 1, 1,  // arms
-    1, 1, 1, 1, 1, 1, 1   // arms
+    5, 5, 5, 5, 2, 2,     // left leg
+    5, 5, 5, 5, 2, 2,     // right leg
+    5, 5, 5,              // waist
+    2, 2, 2, 2, 2, 2, 2,  // left arm
+    2, 2, 2, 2, 2, 2, 2   // right arm
 };
 
 enum class Mode {
@@ -114,6 +112,53 @@ const std::array<int, NUM_ACTIONS> action_motor_indices = {
     RightAnkleRoll
 };
 
+const std::array<int, G1_NUM_MOTOR> old_action_motor_indices = {
+    LeftHipPitch,
+    RightHipPitch,
+    WaistYaw,
+    LeftHipRoll,
+    RightHipRoll,
+    WaistRoll,
+    LeftHipYaw,
+    RightHipYaw,
+    WaistPitch,
+    LeftKnee,
+    RightKnee,
+    LeftShoulderPitch,
+    RightShoulderPitch,
+    LeftAnklePitch,
+    RightAnklePitch,
+    LeftShoulderRoll,
+    RightShoulderRoll,
+    LeftAnkleRoll,
+    RightAnkleRoll,
+    LeftShoulderYaw,
+    RightShoulderYaw,
+    LeftElbow,
+    RightElbow,
+    LeftWristRoll,
+    RightWristRoll,
+    LeftWristPitch,
+    RightWristPitch,
+    LeftWristYaw,
+    RightWristYaw
+};
+
+const std::array<int, NUM_ACTIONS> action_old_order_indices = {
+    0,
+    1,
+    3,
+    4,
+    6,
+    7,
+    9,
+    10,
+    13,
+    14,
+    17,
+    18
+};
+
 const std::array<int, 26> obs_motor_indices = {
     // Legs, in policy observation order
     LeftHipPitch,
@@ -147,9 +192,29 @@ const std::array<int, 26> obs_motor_indices = {
     RightWristYaw
 };
 
-std::array<float, G1_NUM_MOTOR> default_q_{
-    // legs
-    };
+const std::array<float, G1_NUM_MOTOR> default_joint_positions{
+    -0.20f, 0.0f, 0.0f, 0.42f, -0.23f, 0.0f,
+    -0.20f, 0.0f, 0.0f, 0.42f, -0.23f, 0.0f,
+    0.0f, 0.0f, 0.0f,
+    0.35f, 0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f,
+    0.35f, -0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f
+};
+
+const std::array<float, G1_NUM_MOTOR> joint_position_min{
+    -2.5307f, -0.5236f, -2.7576f, -0.087267f, -0.87267f, -0.2618f,
+    -2.5307f, -2.9671f, -2.7576f, -0.087267f, -0.87267f, -0.2618f,
+    -2.618f, -0.52f, -0.52f,
+    -3.0892f, -1.5882f, -2.618f, -1.0472f, -1.97222f, -1.61443f, -1.61443f,
+    -3.0892f, -2.2515f, -2.618f, -1.0472f, -1.97222f, -1.61443f, -1.61443f
+};
+
+const std::array<float, G1_NUM_MOTOR> joint_position_max{
+    2.8798f, 2.9671f, 2.7576f, 2.8798f, 0.5236f, 0.2618f,
+    2.8798f, 0.5236f, 2.7576f, 2.8798f, 0.5236f, 0.2618f,
+    2.618f, 0.52f, 0.52f,
+    2.6704f, 2.2515f, 2.618f, 2.0944f, 1.97222f, 1.61443f, 1.61443f,
+    2.6704f, 1.5882f, 2.618f, 2.0944f, 1.97222f, 1.61443f, 1.61443f
+};
 
 struct MotorCommand {
   std::array<float, G1_NUM_MOTOR> q_target = {};
@@ -167,10 +232,6 @@ struct PolicyBuffers {
     std::array<float, 91> current_obs{};
     boost::circular_buffer<std::array<float, 91>> obs_history{
         10
-    };
-
-    boost::circular_buffer<std::array<float, 29>> action_delay_buffer{
-        29
     };
 
     std::array<float, 910> stacked_obs{};
@@ -208,7 +269,6 @@ private:
     void InitLowCmd();
     void LoadONNX();
     void LowStateMessageHandler(const void *messages);
-    void IMUMessageHandler(const void *messages);
     void LowCmdWrite();
 
     void copyLowStateToMotorState();
@@ -233,7 +293,7 @@ private:
     
 
     std::array<float, 4> command_{
-        0.0f, 0.0f, 0.0f, 0.0f
+        0.0f, 0.0f, 0.0f, 0.7f
     }; 
 
 
@@ -245,38 +305,75 @@ private:
     Eigen::Quaterniond imu_quaternion_{1.0, 0.0, 0.0, 0.0};
     std::array<float, 3> projected_gravity_{0.0f, 0.0f, 0.0f};
 
-    std::array<float, G1_NUM_MOTOR> default_q_{};
+    std::array<float, G1_NUM_MOTOR> default_q_{default_joint_positions};
     std::array<float, G1_NUM_MOTOR> default_dq_{};
+    std::array<float, G1_NUM_MOTOR> startup_q_{};
+    int default_pose_ramp_step_{0};
+    int policy_warmup_step_{0};
+    bool startup_q_initialized_{false};
     
     
     /*publisher*/
     ChannelPublisherPtr<unitree_hg::msg::dds_::LowCmd_> lowcmd_publisher;
     /*subscriber*/
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> lowstate_subscriber;
-    ChannelSubscriberPtr<unitree_hg::msg::dds_::IMUState_> imustate_subscriber;
 
     /*LowCmd write thread*/
     ThreadPtr lowCmdWriteThreadPtr;
 
     std::mutex low_state_mutex_;
-    std::atomic<bool> low_state_received_{false};
-
-    std::mutex imu_state_mutex_;
+    std::atomic<uint64_t> low_state_sequence_{0};
+    uint64_t last_processed_low_state_sequence_{0};
 };
 
 void LocomotionPolicyController::update()
 {
-    if (!low_state_received_) {
+    const uint64_t low_state_sequence =
+        low_state_sequence_.load(std::memory_order_acquire);
+    if (low_state_sequence == 0 ||
+        low_state_sequence == last_processed_low_state_sequence_) {
         return;
     }
+    last_processed_low_state_sequence_ = low_state_sequence;
 
     copyLowStateToMotorState();
+
+    if (default_pose_ramp_step_ < DEFAULT_POSE_RAMP_STEPS) {
+        if (!startup_q_initialized_) {
+            startup_q_ = motor_state_.q;
+            startup_q_initialized_ = true;
+        }
+
+        const float phase =
+            static_cast<float>(default_pose_ramp_step_ + 1) /
+            static_cast<float>(DEFAULT_POSE_RAMP_STEPS);
+
+        for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+            policy_buffers_.target_q[i] =
+                (1.0f - phase) * startup_q_[i] + phase * default_q_[i];
+        }
+
+        policy_buffers_.obs_history.clear();
+        policy_buffers_.delayed_action.fill(0.0f);
+        ++default_pose_ramp_step_;
+        publishCommand();
+        return;
+    }
 
     buildCurrentObservation();
 
     policy_buffers_.obs_history.push_back(policy_buffers_.current_obs);
 
     if (!buildStackedObservation()) {
+        return;
+    }
+
+    if (policy_warmup_step_ < POLICY_WARMUP_STEPS) {
+        runPolicy();
+        postProcessAction();
+        policy_buffers_.target_q = default_q_;
+        publishCommand();
+        ++policy_warmup_step_;
         return;
     }
 
@@ -345,30 +442,37 @@ void LocomotionPolicyController::postProcessAction()
         policy_buffers_.full_action[motor_idx] = policy_buffers_.raw_action[i];
     }
 
-    // Add to delay buffer.
-    policy_buffers_.action_delay_buffer.push_back(policy_buffers_.full_action);
-
-    if (policy_buffers_.action_delay_buffer.size() < ACTION_DELAY) {
-        policy_buffers_.delayed_action = policy_buffers_.full_action;
-    } else {
-        policy_buffers_.delayed_action =
-            policy_buffers_.action_delay_buffer.front();
+    std::array<float, G1_NUM_MOTOR> old_order_action{};
+    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+        old_order_action[i] =
+            policy_buffers_.full_action[old_action_motor_indices[i]];
     }
+
+    policy_buffers_.delayed_action = old_order_action;
 
     // Convert normalized action to joint targets.
     policy_buffers_.target_q = default_q_;
 
     for (int i = 0; i < NUM_ACTIONS; ++i) {
         const int motor_idx = action_motor_indices[i];
+        const int old_order_idx = action_old_order_indices[i];
 
         float action = clip(
-            policy_buffers_.delayed_action[motor_idx],
+            policy_buffers_.delayed_action[old_order_idx],
             -ACTION_CLIP,
             ACTION_CLIP
         );
 
         policy_buffers_.target_q[motor_idx] =
             default_q_[motor_idx] + ACTION_SCALE * action;
+    }
+
+    for (int i = 0; i < G1_NUM_MOTOR; ++i) {
+        policy_buffers_.target_q[i] = clip(
+            policy_buffers_.target_q[i],
+            joint_position_min[i],
+            joint_position_max[i]
+        );
     }
 }
 
@@ -396,9 +500,6 @@ void LocomotionPolicyController::init()
     lowstate_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowState_>(TOPIC_LOWSTATE));
     lowstate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::LowStateMessageHandler, this, std::placeholders::_1), 1);
     
-    imustate_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::IMUState_>(TOPIC_IMUSTATE));
-    imustate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::IMUMessageHandler, this, std::placeholders::_1), 1);
-
     /*loop publishing thread*/
     // lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::LowCmdWrite, this);
 }
@@ -413,20 +514,6 @@ void LocomotionPolicyController::LoadONNX(){
 
 void LocomotionPolicyController::InitLowCmd()
 {
-    // low_cmd.head()[0] = 0xFE;
-    // low_cmd.head()[1] = 0xEF;
-    // low_cmd.level_flag() = 0xFF;
-    // low_cmd.gpio() = 0;
-    //
-    // for (int i = 0; i < 20; i++)
-    // {
-    //     low_cmd.motor_cmd()[i].mode() = (0x01); // motor switch to servo (PMSM) mode
-    //     low_cmd.motor_cmd()[i].q() = (PosStopF);
-    //     low_cmd.motor_cmd()[i].kp() = (0);
-    //     low_cmd.motor_cmd()[i].dq() = (VelStopF);
-    //     low_cmd.motor_cmd()[i].kd() = (0);
-    //     low_cmd.motor_cmd()[i].tau() = (0);
-    // }
 }
 
 void LocomotionPolicyController::LowStateMessageHandler(const void *message)
@@ -437,34 +524,8 @@ void LocomotionPolicyController::LowStateMessageHandler(const void *message)
         std::lock_guard<std::mutex> lock(low_state_mutex_);
         low_state = *state;
     }
-    low_state_received_ = true;
+    low_state_sequence_.fetch_add(1, std::memory_order_release);
 }
-
-void LocomotionPolicyController::IMUMessageHandler(const void *message)
-{
-    auto imu = (const unitree_hg::msg::dds_::IMUState_*)message;
-    {
-        std::lock_guard<std::mutex> lock(imu_state_mutex_);
-        gyro_[0] = imu->gyroscope()[0];
-        gyro_[1] = imu->gyroscope()[1];
-        gyro_[2] = imu->gyroscope()[2];
-
-        imu_quaternion_.w() = imu->quaternion()[0];
-        imu_quaternion_.x() = imu->quaternion()[1];
-        imu_quaternion_.y() = imu->quaternion()[2];
-        imu_quaternion_.z() = imu->quaternion()[3];
-
-        Eigen::Vector3d gravity(0.0, 0.0, -1.0);
-        Eigen::Matrix3d rotation_matrix = imu_quaternion_.toRotationMatrix();
-
-        Eigen::Vector3d projected_gravity = rotation_matrix.transpose() * gravity;
-        projected_gravity_[0] = projected_gravity[0];
-        projected_gravity_[1] = projected_gravity[1];
-        projected_gravity_[2] = projected_gravity[2];
-
-    }
-}
-
 
 void LocomotionPolicyController::copyLowStateToMotorState() {
     unitree_hg::msg::dds_::LowState_ state_copy{};
@@ -478,6 +539,23 @@ void LocomotionPolicyController::copyLowStateToMotorState() {
         motor_state_.q[i] = state_copy.motor_state()[i].q();
         motor_state_.dq[i] = state_copy.motor_state()[i].dq();
     }
+
+    gyro_[0] = state_copy.imu_state().gyroscope()[0];
+    gyro_[1] = state_copy.imu_state().gyroscope()[1];
+    gyro_[2] = state_copy.imu_state().gyroscope()[2];
+
+    imu_quaternion_.w() = state_copy.imu_state().quaternion()[0];
+    imu_quaternion_.x() = state_copy.imu_state().quaternion()[1];
+    imu_quaternion_.y() = state_copy.imu_state().quaternion()[2];
+    imu_quaternion_.z() = state_copy.imu_state().quaternion()[3];
+
+    Eigen::Vector3d gravity(0.0, 0.0, -1.0);
+    Eigen::Matrix3d rotation_matrix = imu_quaternion_.toRotationMatrix();
+    Eigen::Vector3d projected_gravity = rotation_matrix.transpose() * gravity;
+
+    projected_gravity_[0] = projected_gravity[0];
+    projected_gravity_[1] = projected_gravity[1];
+    projected_gravity_[2] = projected_gravity[2];
 }
 
 void LocomotionPolicyController::buildCurrentObservation()
@@ -532,43 +610,6 @@ bool LocomotionPolicyController::buildStackedObservation(){
     return true;
 }
 
-// void Custom::LowCmdWrite()
-// {
-//
-//     runing_time += dt;
-//     if (runing_time < 3.0)
-//     {
-//         // Stand up in first 3 second
-//
-//         // Total time for standing up or standing down is about 1.2s
-//         phase = tanh(runing_time / 1.2);
-//         for (int i = 0; i < 12; i++)
-//         {
-//             low_cmd.motor_cmd()[i].q() = phase * stand_up_joint_pos[i] + (1 - phase) * stand_down_joint_pos[i];
-//             low_cmd.motor_cmd()[i].dq() = 0;
-//             low_cmd.motor_cmd()[i].kp() = phase * 50.0 + (1 - phase) * 20.0;
-//             low_cmd.motor_cmd()[i].kd() = 3.5;
-//             low_cmd.motor_cmd()[i].tau() = 0;
-//         }
-//     }
-//     else
-//     {
-//         // Then stand down
-//         phase = tanh((runing_time - 3.0) / 1.2);
-//         for (int i = 0; i < 12; i++)
-//         {
-//             low_cmd.motor_cmd()[i].q() = phase * stand_down_joint_pos[i] + (1 - phase) * stand_up_joint_pos[i];
-//             low_cmd.motor_cmd()[i].dq() = 0;
-//             low_cmd.motor_cmd()[i].kp() = 50;
-//             low_cmd.motor_cmd()[i].kd() = 3.5;
-//             low_cmd.motor_cmd()[i].tau() = 0;
-//         }
-//     }
-//
-//     low_cmd.crc() = crc32_core((uint32_t *)&low_cmd, (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
-//     lowcmd_publisher->Write(low_cmd);
-// }
-
 int main(int argc, const char **argv)
 {
        
@@ -588,6 +629,7 @@ int main(int argc, const char **argv)
     while (true)
     {
         controller.update();
+        // usleep(100000);  // 50 Hz
         usleep(20000);  // 50 Hz
     }
 
