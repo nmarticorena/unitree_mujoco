@@ -13,6 +13,7 @@ build_sim = {cmd = "cmake -S simulate -B simulate/build && cmake --build simulat
 build_walk = {cmd = "cmake -S example/walking -B example/walking/build && cmake --build example/walking/build", inputs = ["example/walking/src"]}
 
 walk = {cmd = "./example/walking/build/walking_g1", depends-on = ["build_walk"]}
+walk_mjlab = {cmd = "./example/walking/build/walking_g1_mjlab", depends-on = ["build_walk"]}
 sim = {cmd = "./simulate/build/unitree_mujoco", depends-on = ["build_sim"]}
 
 [dependencies]
