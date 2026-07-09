@@ -28,8 +28,10 @@ using namespace unitree::robot;
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
 #define TOPIC_SPORTMODE "rt/sportmodestate"
+#define TOPIC_ARM_SDK "rt/arm_sdk"
 
 const int G1_NUM_MOTOR = 29;
+constexpr int G1_LOW_CMD_NUM_MOTOR = 35;
 
 constexpr int NUM_OBS = 99;
 constexpr int NUM_OBS_HISTORY = 1;
@@ -151,6 +153,34 @@ const std::array<int, NUM_POLICY_JOINTS> policy_motor_indices = {
     RightWristYaw
 };
 
+constexpr int ARM_SDK_ENABLE_INDEX = 29;
+constexpr float ARM_SDK_ENABLE_THRESHOLD = 0.5f;
+constexpr int NUM_ARM_SDK_MOTORS = 14;
+
+const std::array<int, NUM_ARM_SDK_MOTORS> arm_sdk_motor_indices = {
+    LeftShoulderPitch,
+    LeftShoulderRoll,
+    LeftShoulderYaw,
+    LeftElbow,
+    LeftWristRoll,
+    LeftWristPitch,
+    LeftWristYaw,
+    RightShoulderPitch,
+    RightShoulderRoll,
+    RightShoulderYaw,
+    RightElbow,
+    RightWristRoll,
+    RightWristPitch,
+    RightWristYaw
+};
+
+const std::array<float, NUM_ARM_SDK_MOTORS> default_arm_joint_positions = {
+    0.2f, 0.2f, 0.0f, 0.6f, 0.0f, 0.0f, 0.0f,
+    0.2f, -0.2f, 0.0f, 0.6f, 0.0f, 0.0f, 0.0f
+};
+
+static_assert(ARM_SDK_ENABLE_INDEX < G1_LOW_CMD_NUM_MOTOR);
+
 const std::array<float, NUM_POLICY_JOINTS> action_scale = {
     ACTION_SCALE_7520_14,
     ACTION_SCALE_7520_22,
@@ -251,6 +281,7 @@ private:
     void LoadONNX();
     void LowStateMessageHandler(const void *messages);
     void SportModeMessageHandler(const void *messages);
+    void ArmSdkMessageHandler(const void *messages);
 
     void copyLowStateToMotorState();
     void buildCurrentObservation();
@@ -269,11 +300,12 @@ private:
     // Robot state
     MotorState motor_state_;
     unitree_hg::msg::dds_::LowCmd_ low_cmd{};     // default init
+    unitree_hg::msg::dds_::LowCmd_ arm_sdk_cmd{}; // default init
     unitree_hg::msg::dds_::LowState_ low_state{}; // default init
     
 
     std::array<float, 3> command_{
-        1.0f, 0.0f, 0.0f 
+        0.0f, 0.0f, 0.0f 
     }; 
 
 
@@ -301,12 +333,15 @@ private:
     /*subscriber*/
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> lowstate_subscriber;
     ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> sportmode_subscriber;
+    ChannelSubscriberPtr<unitree_hg::msg::dds_::LowCmd_> arm_sdk_subscriber;
 
     /*LowCmd write thread*/
     ThreadPtr lowCmdWriteThreadPtr;
 
     std::mutex low_state_mutex_;
+    std::mutex arm_sdk_mutex_;
     std::atomic<uint64_t> low_state_sequence_{0};
+    std::atomic<uint64_t> arm_sdk_sequence_{0};
     uint64_t last_processed_low_state_sequence_{0};
 };
 
@@ -368,6 +403,17 @@ void LocomotionPolicyController::update()
 
 void LocomotionPolicyController::publishCommand()
 {
+    unitree_hg::msg::dds_::LowCmd_ arm_sdk_cmd_copy{};
+    bool use_arm_sdk_cmd = false;
+
+    if (arm_sdk_sequence_.load(std::memory_order_acquire) > 0) {
+        std::lock_guard<std::mutex> lock(arm_sdk_mutex_);
+        arm_sdk_cmd_copy = arm_sdk_cmd;
+        use_arm_sdk_cmd =
+            arm_sdk_cmd_copy.motor_cmd()[ARM_SDK_ENABLE_INDEX].q() >
+            ARM_SDK_ENABLE_THRESHOLD;
+    }
+
     for (int i = 0; i < G1_NUM_MOTOR; ++i) {
         low_cmd.motor_cmd()[i].mode() = 0x01;
         low_cmd.motor_cmd()[i].q() = policy_buffers_.target_q[i];
@@ -375,6 +421,39 @@ void LocomotionPolicyController::publishCommand()
         low_cmd.motor_cmd()[i].kp() = Kp[i];
         low_cmd.motor_cmd()[i].kd() = Kd[i];
         low_cmd.motor_cmd()[i].tau() = 0.0f;
+    }
+
+    // Do not let the mjlab locomotion policy own the arm joints.
+    for (std::size_t i = 0; i < arm_sdk_motor_indices.size(); ++i) {
+        const int motor_idx = arm_sdk_motor_indices[i];
+        auto& dst = low_cmd.motor_cmd()[motor_idx];
+
+        if (use_arm_sdk_cmd) {
+            const auto& src = arm_sdk_cmd_copy.motor_cmd()[motor_idx];
+
+            dst.mode() = src.mode();
+            dst.q() = clip(
+                src.q(),
+                joint_position_min[motor_idx],
+                joint_position_max[motor_idx]
+            );
+            dst.dq() = src.dq();
+            dst.tau() = src.tau();
+            if (src.kp() > 0.0f) {
+                dst.kp() = src.kp();
+            }
+            if (src.kd() > 0.0f) {
+                dst.kd() = src.kd();
+            }
+        } else {
+            dst.q() = clip(
+                default_arm_joint_positions[i],
+                joint_position_min[motor_idx],
+                joint_position_max[motor_idx]
+            );
+            dst.dq() = 0.0f;
+            dst.tau() = 0.0f;
+        }
     }
 
     lowcmd_publisher->Write(low_cmd);
@@ -462,6 +541,8 @@ void LocomotionPolicyController::init()
     lowstate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::LowStateMessageHandler, this, std::placeholders::_1), 1);
     sportmode_subscriber.reset(new ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_SPORTMODE));
     sportmode_subscriber->InitChannel(std::bind(&LocomotionPolicyController::SportModeMessageHandler, this, std::placeholders::_1), 1);
+    arm_sdk_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowCmd_>(TOPIC_ARM_SDK));
+    arm_sdk_subscriber->InitChannel(std::bind(&LocomotionPolicyController::ArmSdkMessageHandler, this, std::placeholders::_1), 1);
     
     /*loop publishing thread*/
     lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::update, this);
@@ -507,6 +588,17 @@ void LocomotionPolicyController::LowStateMessageHandler(const void *message)
         low_state = *state;
     }
     low_state_sequence_.fetch_add(1, std::memory_order_release);
+}
+
+void LocomotionPolicyController::ArmSdkMessageHandler(const void *message)
+{
+    auto command =
+        (const unitree_hg::msg::dds_::LowCmd_*)message;
+    {
+        std::lock_guard<std::mutex> lock(arm_sdk_mutex_);
+        arm_sdk_cmd = *command;
+    }
+    arm_sdk_sequence_.fetch_add(1, std::memory_order_release);
 }
 
 void LocomotionPolicyController::copyLowStateToMotorState() {
