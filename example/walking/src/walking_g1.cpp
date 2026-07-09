@@ -8,6 +8,7 @@
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
+#include <unitree/idl/ros2/String_.hpp>
 
 
 #include <unitree/common/time/time_tool.hpp>
@@ -291,7 +292,6 @@ public:
     );
 
     void init();
-    void setCommand(double vx, double vy, double wz, double height);
     void update();
     void publishCommand();
 
@@ -300,6 +300,8 @@ private:
     void LoadONNX();
     void LowStateMessageHandler(const void *messages);
     void ArmSdkMessageHandler(const void *messages);
+    void RunCommandMessageHandler(const void *messages);
+    void setCommand(double vx, double vy, double wz, double height);
     void LowCmdWrite();
 
     void copyLowStateToMotorState();
@@ -350,6 +352,7 @@ private:
     /*subscriber*/
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> lowstate_subscriber;
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowCmd_> arm_sdk_subscriber;
+    ChannelSubscriberPtr<std_msgs::msg::dds_::String_> velocity_subscriber;
 
     /*LowCmd write thread*/
     ThreadPtr lowCmdWriteThreadPtr;
@@ -580,6 +583,8 @@ void LocomotionPolicyController::init()
     lowstate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::LowStateMessageHandler, this, std::placeholders::_1), 1);
     arm_sdk_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowCmd_>(TOPIC_ARM_SDK));
     arm_sdk_subscriber->InitChannel(std::bind(&LocomotionPolicyController::ArmSdkMessageHandler, this, std::placeholders::_1), 1);
+    velocity_subscriber.reset(new ChannelSubscriber<std_msgs::msg::dds_::String_>("rt/run_command/cmd"));
+    velocity_subscriber->InitChannel(std::bind(&LocomotionPolicyController::RunCommandMessageHandler, this, std::placeholders::_1), 1);
     
     /*loop publishing thread*/
     lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::update, this);
@@ -617,6 +622,31 @@ void LocomotionPolicyController::ArmSdkMessageHandler(const void *message)
     }
     arm_sdk_sequence_.fetch_add(1, std::memory_order_release);
 }
+
+void LocomotionPolicyController::RunCommandMessageHandler(const void *message)
+{
+    auto command =
+        (const std_msgs::msg::dds_::String_*)message;
+    std::string cmd_str(command->data().c_str());
+    std::istringstream iss(cmd_str);
+    double vx, vy, wz, height;
+    if (iss >> vx >> vy >> wz >> height) {
+        setCommand(vx, vy, wz, height);
+    } else {
+        std::cerr << "Invalid command format: " << cmd_str << std::endl;
+    }
+}
+
+void LocomotionPolicyController::setCommand(double vx, double vy, double wz, double height)
+{
+    command_[0] = static_cast<float>(vx);
+    command_[1] = static_cast<float>(vy);
+    command_[2] = static_cast<float>(wz);
+    command_[3] = static_cast<float>(height);
+    std::cout << "Received command: vx=" << vx << ", vy=" << vy << ", wz=" << wz << ", height=" << height << std::endl;
+}
+
+// void 
 
 void LocomotionPolicyController::copyLowStateToMotorState() {
     unitree_hg::msg::dds_::LowState_ state_copy{};
