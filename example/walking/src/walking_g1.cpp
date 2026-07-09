@@ -216,8 +216,8 @@ const std::array<int, NUM_ARM_SDK_MOTORS> arm_sdk_motor_indices = {
 };
 
 const std::array<float, NUM_ARM_SDK_MOTORS> default_arm_joint_positions = {
-    0.35f, 0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f,
-    0.35f, -0.18f, 0.0f, 0.87f, 0.0f, 0.0f, 0.0f
+    0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f,
+    0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f
 };
 
 static_assert(ARM_SDK_ENABLE_INDEX < G1_LOW_CMD_NUM_MOTOR);
