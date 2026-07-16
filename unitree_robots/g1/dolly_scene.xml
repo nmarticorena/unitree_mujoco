@@ -1,6 +1,5 @@
 <mujoco model="g1_29dof scene with dolly">
   <include file="g1_29dof.xml"/>
-  <include file="dolly/dolly_assets.xml"/>
 
   <statistic center="0 0 0.5" extent="2.0"/>
 
@@ -10,17 +9,35 @@
     <global azimuth="-130" elevation="-20"/>
   </visual>
 
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" contype="1" conaffinity="1" mass="0"/>
+    </default>
+  </default>
+
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <mesh name="dolly_mesh" file="../dolly/dolly.obj" scale="0.5 0.5 0.5"/>
+    <texture name="dolly_tex" type="2d" file="dolly/Material.007.png"/>
+    <material name="dolly_mat" texture="dolly_tex" texuniform="true"/>
   </asset>
   <!-- <hfield name="perlin_hfield" size="1.0 0.75 0.2 0.2" file="../height_field.png" /><hfield name="image_hfield" size="1.0 1.0 0.02 0.1" file="../unitree_hfield.png" /></asset> -->
 
+  <custom>
+    <!-- Handle layout constants. Keep the literal handle fromto coordinates below
+         in sync with these values until the model has a preprocessing step. -->
+    <numeric name="dolly_handle_x_distance" data="0"/>
+    <numeric name="dolly_handle_y_distance" data="0"/>
+  </custom>
 
   <worldbody>
-    <body name="dolly" pos="0.8 0.0 0.45" euler="0 0 0">
+    <body name="dolly" pos="1.5 0.0 0.45" euler="0 0 0">
       <include file="dolly/dolly_body.xml"/>
     </body>
 
