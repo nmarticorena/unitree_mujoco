@@ -42,6 +42,14 @@ inline struct SimulationConfig
     int object_pose_rate_hz = 50;
     std::vector<ObjectPoseConfig> object_pose_publishers;
 
+    int publish_camera = 0;
+    std::string camera_name = "head_camera";
+    std::string camera_topic = "rt/head_camera/front_video";
+    std::string camera_frame = "head_camera";
+    int camera_width = 640;
+    int camera_height = 480;
+    int camera_rate_hz = 15;
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -71,6 +79,27 @@ inline struct SimulationConfig
             }
             if (cfg["object_pose_rate_hz"]) {
                 object_pose_rate_hz = cfg["object_pose_rate_hz"].as<int>();
+            }
+            if (cfg["publish_camera"]) {
+                publish_camera = cfg["publish_camera"].as<int>();
+            }
+            if (cfg["camera_name"]) {
+                camera_name = cfg["camera_name"].as<std::string>();
+            }
+            if (cfg["camera_topic"]) {
+                camera_topic = cfg["camera_topic"].as<std::string>();
+            }
+            if (cfg["camera_frame"]) {
+                camera_frame = cfg["camera_frame"].as<std::string>();
+            }
+            if (cfg["camera_width"]) {
+                camera_width = cfg["camera_width"].as<int>();
+            }
+            if (cfg["camera_height"]) {
+                camera_height = cfg["camera_height"].as<int>();
+            }
+            if (cfg["camera_rate_hz"]) {
+                camera_rate_hz = cfg["camera_rate_hz"].as<int>();
             }
             if (cfg["object_pose_publishers"]) {
                 object_pose_publishers.clear();
@@ -110,6 +139,13 @@ inline po::variables_map helper(int argc, char** argv)
         ("object_pose_topic", po::value<std::string>(&config.object_pose_topic), "DDS topic for the object PoseStamped")
         ("object_pose_frame", po::value<std::string>(&config.object_pose_frame), "Frame id for the object PoseStamped")
         ("object_pose_rate_hz", po::value<int>(&config.object_pose_rate_hz), "Object pose publishing rate in Hz")
+        ("publish_camera", po::value<int>(&config.publish_camera), "Publish a MuJoCo camera through DDS; 0 or 1")
+        ("camera_name", po::value<std::string>(&config.camera_name), "MuJoCo camera name to render")
+        ("camera_topic", po::value<std::string>(&config.camera_topic), "DDS topic for Go2FrontVideoData camera payload")
+        ("camera_frame", po::value<std::string>(&config.camera_frame), "Frame id encoded in camera metadata")
+        ("camera_width", po::value<int>(&config.camera_width), "Camera render width")
+        ("camera_height", po::value<int>(&config.camera_height), "Camera render height")
+        ("camera_rate_hz", po::value<int>(&config.camera_rate_hz), "Camera publishing rate in Hz")
     ;
 
     po::variables_map vm;

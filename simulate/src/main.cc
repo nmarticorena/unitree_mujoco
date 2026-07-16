@@ -18,20 +18,26 @@
 #undef private
 
 #include <chrono>
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <mujoco/mujoco.h>
 #include <unitree/common/thread/recurrent_thread.hpp>
+#include <unitree/idl/go2/Go2FrontVideoData_.hpp>
 #include <unitree/idl/ros2/PoseStamped_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include "simulate.h"
@@ -200,6 +206,328 @@ namespace
   mjtNum *ctrlnoise = nullptr;
 
   using Seconds = std::chrono::duration<double>;
+
+  void SelectViewerCamera(mj::Simulate &sim, const mjModel *model)
+  {
+    if (!model)
+    {
+      return;
+    }
+
+    const int camera_id = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
+    if (camera_id < 0)
+    {
+      sim.cam.type = mjCAMERA_FREE;
+      sim.camera = 0;
+      return;
+    }
+
+    sim.cam.type = mjCAMERA_FIXED;
+    sim.cam.fixedcamid = camera_id;
+    sim.camera = camera_id + 2;  // UI entries are: Free, Tracking, then fixed cameras.
+  }
+
+  class CameraVideoPublisher
+  {
+  public:
+    using VideoMsg_t = unitree_go::msg::dds_::Go2FrontVideoData_;
+
+    CameraVideoPublisher(mj::Simulate *sim, GLFWwindow *render_window)
+        : sim_(sim),
+          render_window_(render_window),
+          publisher_(param::config.camera_topic)
+    {
+      width_ = std::max(1, param::config.camera_width);
+      height_ = std::max(1, param::config.camera_height);
+      rate_hz_ = std::max(1, param::config.camera_rate_hz);
+    }
+
+    ~CameraVideoPublisher()
+    {
+      stop();
+    }
+
+    bool start()
+    {
+      if (!sim_ || !render_window_)
+      {
+        std::cerr << "Camera publisher disabled: no OpenGL render window is available" << std::endl;
+        return false;
+      }
+
+      publisher_.InitChannel();
+      running_.store(true);
+      thread_ = std::thread(&CameraVideoPublisher::loop, this);
+      std::cout << "Publishing MuJoCo camera '" << param::config.camera_name
+                << "' on DDS topic '" << param::config.camera_topic
+                << "' at " << width_ << "x" << height_
+                << " @ " << rate_hz_ << " Hz" << std::endl;
+      return true;
+    }
+
+    void stop()
+    {
+      running_.store(false);
+      if (thread_.joinable())
+      {
+        thread_.join();
+      }
+    }
+
+  private:
+    void loop()
+    {
+      glfwMakeContextCurrent(render_window_);
+      mjv_defaultScene(&scene_);
+      mjv_defaultOption(&option_);
+      mjr_defaultContext(&context_);
+
+      const auto period = std::chrono::microseconds(1000000 / rate_hz_);
+      while (running_.load() && !sim_->exitrequest.load())
+      {
+        const auto start = std::chrono::steady_clock::now();
+        publishFrame();
+
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed < period)
+        {
+          std::this_thread::sleep_for(period - elapsed);
+        }
+      }
+
+      releaseModelResources();
+      glfwMakeContextCurrent(nullptr);
+    }
+
+    bool ensureModelResources(const mjModel *model)
+    {
+      if (model == model_)
+      {
+        return camera_id_ >= 0;
+      }
+
+      releaseModelResources();
+      model_ = model;
+
+      camera_id_ = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
+      if (camera_id_ < 0)
+      {
+        std::cerr << "Camera publisher disabled for loaded model: MuJoCo camera '"
+                  << param::config.camera_name << "' was not found" << std::endl;
+        return false;
+      }
+
+      mjv_makeScene(model, &scene_, mj::Simulate::kMaxGeom);
+      scene_ready_ = true;
+
+      mjr_makeContext(model, &context_, mjFONTSCALE_150);
+      context_ready_ = true;
+      mjr_resizeOffscreen(width_, height_, &context_);
+      mjr_setBuffer(mjFB_OFFSCREEN, &context_);
+      context_.readDepthMap = mjDEPTH_ZERONEAR;
+
+      raw_rgb_.resize(static_cast<size_t>(width_) * height_ * 3);
+      rgb_topdown_.resize(raw_rgb_.size());
+      raw_depth_.resize(static_cast<size_t>(width_) * height_);
+      metric_depth_.resize(raw_depth_.size());
+      depth_bytes_.resize(raw_depth_.size() * sizeof(float));
+
+      return true;
+    }
+
+    void releaseModelResources()
+    {
+      if (context_ready_)
+      {
+        mjr_freeContext(&context_);
+        context_ready_ = false;
+      }
+      if (scene_ready_)
+      {
+        mjv_freeScene(&scene_);
+        scene_ready_ = false;
+      }
+      model_ = nullptr;
+      camera_id_ = -1;
+    }
+
+    void publishFrame()
+    {
+      double sim_time = 0.0;
+      double znear = 0.0;
+      double zfar = 0.0;
+      std::array<double, 3> camera_position = {};
+      std::array<double, 4> camera_quaternion = {};
+
+      {
+        const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
+        if (!m || !d)
+        {
+          return;
+        }
+
+        if (!ensureModelResources(m))
+        {
+          return;
+        }
+
+        mjvCamera camera;
+        mjv_defaultCamera(&camera);
+        camera.type = mjCAMERA_FIXED;
+        camera.fixedcamid = camera_id_;
+
+        // Refresh derived positions so the fixed camera follows qpos changes
+        // made outside the normal stepping path, including paused UI edits.
+        mj_fwdPosition(m, d);
+
+        const mjtNum *cam_xpos = d->cam_xpos + 3 * camera_id_;
+        const mjtNum *cam_xmat = d->cam_xmat + 9 * camera_id_;
+        mjtNum cam_quat[4] = {};
+        mju_mat2Quat(cam_quat, cam_xmat);
+        for (int i = 0; i < 3; ++i)
+        {
+          camera_position[i] = cam_xpos[i];
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+          camera_quaternion[i] = cam_quat[i];
+        }
+
+        const mjrRect viewport = {0, 0, width_, height_};
+        mjv_updateScene(m, d, &option_, nullptr, &camera, mjCAT_ALL, &scene_);
+        mjr_setBuffer(mjFB_OFFSCREEN, &context_);
+        mjr_render(viewport, &scene_, &context_);
+        mjr_readPixels(raw_rgb_.data(), raw_depth_.data(), viewport, &context_);
+
+        sim_time = d->time;
+        znear = m->vis.map.znear * m->stat.extent;
+        zfar = m->vis.map.zfar * m->stat.extent;
+      }
+
+      packTopDownRgb();
+      packMetricDepth(znear, zfar);
+
+      VideoMsg_t msg;
+      const auto publish_time_ns = static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
+      msg.time_frame(publish_time_ns);
+      msg.video720p(rgb_topdown_);
+      msg.video360p(depth_bytes_);
+      msg.video180p(makeMetadata(sim_time, camera_position, camera_quaternion));
+      publisher_.Write(msg);
+    }
+
+    void packTopDownRgb()
+    {
+      const size_t row_bytes = static_cast<size_t>(width_) * 3;
+      for (int row = 0; row < height_; ++row)
+      {
+        const size_t src = static_cast<size_t>(height_ - 1 - row) * row_bytes;
+        const size_t dst = static_cast<size_t>(row) * row_bytes;
+        std::copy(raw_rgb_.begin() + src, raw_rgb_.begin() + src + row_bytes,
+                  rgb_topdown_.begin() + dst);
+      }
+    }
+
+    void packMetricDepth(double znear, double zfar)
+    {
+      if (znear <= 0.0 || zfar <= znear)
+      {
+        std::fill(metric_depth_.begin(), metric_depth_.end(),
+                  std::numeric_limits<float>::quiet_NaN());
+      }
+      else
+      {
+        for (int row = 0; row < height_; ++row)
+        {
+          for (int col = 0; col < width_; ++col)
+          {
+            const size_t src = static_cast<size_t>(height_ - 1 - row) * width_ + col;
+            const size_t dst = static_cast<size_t>(row) * width_ + col;
+            double depth = raw_depth_[src];
+            if (context_.readDepthMap == mjDEPTH_ZEROFAR)
+            {
+              depth = 1.0 - depth;
+            }
+            depth = std::clamp(depth, 0.0, 1.0);
+            metric_depth_[dst] = static_cast<float>(
+                znear * zfar / (zfar - depth * (zfar - znear)));
+          }
+        }
+      }
+
+      std::memcpy(depth_bytes_.data(), metric_depth_.data(), depth_bytes_.size());
+    }
+
+    std::vector<uint8_t> makeMetadata(double sim_time,
+                                      const std::array<double, 3> &camera_position,
+                                      const std::array<double, 4> &camera_quaternion) const
+    {
+      char metadata[1024];
+      const int n = std::snprintf(
+          metadata, sizeof(metadata),
+          "unitree_mujoco_camera_v1;"
+          "camera=%s;frame=%s;width=%d;height=%d;"
+          "video720p=rgb8;video360p=32FC1_meters;origin=top_left;"
+          "time_frame=publish_monotonic_ns;sim_time=%.9f;"
+          "camera_pos_world=%.9g,%.9g,%.9g;"
+          "camera_quat_world_wxyz=%.9g,%.9g,%.9g,%.9g",
+          param::config.camera_name.c_str(), param::config.camera_frame.c_str(),
+          width_, height_, sim_time,
+          camera_position[0], camera_position[1], camera_position[2],
+          camera_quaternion[0], camera_quaternion[1],
+          camera_quaternion[2], camera_quaternion[3]);
+
+      if (n <= 0)
+      {
+        return {};
+      }
+      const size_t size = std::min(static_cast<size_t>(n), sizeof(metadata) - 1);
+      return std::vector<uint8_t>(metadata, metadata + size);
+    }
+
+    mj::Simulate *sim_ = nullptr;
+    GLFWwindow *render_window_ = nullptr;
+    unitree::robot::ChannelPublisher<VideoMsg_t> publisher_;
+    std::atomic_bool running_{false};
+    std::thread thread_;
+
+    const mjModel *model_ = nullptr;
+    int camera_id_ = -1;
+    int width_ = 640;
+    int height_ = 480;
+    int rate_hz_ = 15;
+    bool scene_ready_ = false;
+    bool context_ready_ = false;
+
+    mjvScene scene_ = {};
+    mjvOption option_ = {};
+    mjrContext context_ = {};
+    std::vector<unsigned char> raw_rgb_;
+    std::vector<uint8_t> rgb_topdown_;
+    std::vector<float> raw_depth_;
+    std::vector<float> metric_depth_;
+    std::vector<uint8_t> depth_bytes_;
+  };
+
+  GLFWwindow *CreateHiddenCameraWindow()
+  {
+    if (param::config.publish_camera != 1)
+    {
+      return nullptr;
+    }
+
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow *window = glfwCreateWindow(1, 1, "unitree_camera_publisher", nullptr, nullptr);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+    if (!window)
+    {
+      std::cerr << "Camera publisher disabled: failed to create hidden GLFW window" << std::endl;
+    }
+    return window;
+  }
 
   //---------------------------------------- plugin handling -----------------------------------------
 
@@ -441,10 +769,13 @@ namespace
 
         mjData *dnew = nullptr;
         if (mnew)
+        {
           dnew = mj_makeData(mnew);
+        }
         if (dnew)
         {
           sim.Load(mnew, dnew, sim.dropfilename);
+          SelectViewerCamera(sim, mnew);
 
           mj_deleteData(d);
           mj_deleteModel(m);
@@ -475,6 +806,7 @@ namespace
         if (dnew)
         {
           sim.Load(mnew, dnew, sim.filename);
+          SelectViewerCamera(sim, mnew);
 
           mj_deleteData(d);
           mj_deleteModel(m);
@@ -644,6 +976,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
     if (d)
     {
       sim->Load(m, d, filename);
+      SelectViewerCamera(*sim, m);
       mj_forward(m, d);
 
       // allocate ctrlnoise
@@ -667,7 +1000,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
   exit(0);
 }
 
-void *UnitreeSdk2BridgeThread(void *arg)
+void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
 {
   // Wait for mujoco data
   while (true)
@@ -681,6 +1014,13 @@ void *UnitreeSdk2BridgeThread(void *arg)
   }
 
   unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
+
+  std::unique_ptr<CameraVideoPublisher> camera_publisher;
+  if (param::config.publish_camera == 1)
+  {
+    camera_publisher = std::make_unique<CameraVideoPublisher>(sim, camera_window);
+    camera_publisher->start();
+  }
 
   std::vector<std::unique_ptr<ObjectPosePublisher>> object_pose_publishers;
   if (param::config.publish_object_pose == 1)
@@ -799,7 +1139,8 @@ int main(int argc, char **argv)
     std::make_unique<mj::GlfwAdapter>(),
     &cam, &opt, &pert, /* is_passive = */ false);
 
-  std::thread unitree_thread(UnitreeSdk2BridgeThread, nullptr);
+  GLFWwindow *camera_window = CreateHiddenCameraWindow();
+  std::thread unitree_thread(UnitreeSdk2BridgeThread, sim.get(), camera_window);
 
   // start physics thread
   std::thread physicsthreadhandle(&PhysicsThread, sim.get(), param::config.robot_scene.c_str());
