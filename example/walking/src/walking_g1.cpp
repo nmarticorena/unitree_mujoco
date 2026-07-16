@@ -327,8 +327,12 @@ private:
     
 
     std::array<float, 4> command_{
-        0.0f, 0.0f, 0.0f, 0.7f
+        0.0f, 0.0f, 0.0f, 0.8f
     }; 
+
+    std::array<float, 4> default_command_{
+        0.0f, 0.0f, 0.0f, 0.8f
+    };
 
 
     // Controller
@@ -353,6 +357,7 @@ private:
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> lowstate_subscriber;
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowCmd_> arm_sdk_subscriber;
     ChannelSubscriberPtr<std_msgs::msg::dds_::String_> velocity_subscriber;
+    double last_timestamp_{0.0f};
 
     /*LowCmd write thread*/
     ThreadPtr lowCmdWriteThreadPtr;
@@ -635,6 +640,9 @@ void LocomotionPolicyController::RunCommandMessageHandler(const void *message)
     } else {
         std::cerr << "Invalid command format: " << cmd_str << std::endl;
     }
+    last_timestamp_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count() / 1000.0;
 }
 
 void LocomotionPolicyController::setCommand(double vx, double vy, double wz, double height)
@@ -690,9 +698,18 @@ void LocomotionPolicyController::buildCurrentObservation()
     for (int i = 0; i < 3; ++i) {
         policy_buffers_.current_obs[k++] = projected_gravity_[i];
     }
-
-    for (int i = 0; i < 4; ++i) {
-        policy_buffers_.current_obs[k++] = command_[i];
+    double current_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count() / 1000.0;
+    
+    if (current_time - last_timestamp_ > 1.0f) {
+        for (int i = 0; i < 4; ++i) {
+            policy_buffers_.current_obs[k++] = default_command_[i];
+        }
+    } else {
+        for (int i = 0; i < 4; ++i) {
+            policy_buffers_.current_obs[k++] = command_[i];
+        }
     }
 
     for (int motor_idx : obs_motor_indices) {
