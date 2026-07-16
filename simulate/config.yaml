@@ -9,7 +9,7 @@ joystick_type: "xbox" # support "xbox" and "switch" gamepad layout
 joystick_device: "/dev/input/js0" # Device path
 joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 
-print_scene_information: 1 # Print link, joint and sensors information of robot
+print_scene_information: 0 # Print link, joint and sensors information of robot
 
 enable_elastic_band: 1 # Virtual spring band, used for lifting h1
 
@@ -25,3 +25,11 @@ object_pose_publishers:
     topic: "rt/torso_pose"
     frame: "world"
     rate_hz: 50
+
+publish_camera: 0 # Publish camera RGB/depth through DDS as unitree_go::msg::dds_::Go2FrontVideoData_
+camera_name: "head_camera"
+camera_topic: "rt/head_camera/front_video"
+camera_frame: "head_camera"
+camera_width: 640
+camera_height: 480
+camera_rate_hz: 15
