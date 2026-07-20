@@ -1,10 +1,13 @@
 #pragma once
 
-#include <iostream>
+#include <array>
 #include <boost/program_options.hpp>
-#include <yaml-cpp/yaml.h>
+#include <cmath>
 #include <filesystem>
+#include <iostream>
+#include <stdexcept>
 #include <vector>
+#include <yaml-cpp/yaml.h>
 
 namespace param
 {
@@ -15,6 +18,14 @@ struct ObjectPoseConfig
     std::string topic;
     std::string frame;
     int rate_hz;
+};
+
+struct SceneResetPoseConfig
+{
+    std::array<double, 3> position = {1.5, 0.0, 0.45};
+    std::array<double, 3> position_margin = {0.0, 0.0, 0.0};
+    double yaw = 0.0;
+    double yaw_margin = 0.0;
 };
 
 inline struct SimulationConfig
@@ -33,7 +44,15 @@ inline struct SimulationConfig
     int print_scene_information;
 
     int enable_elastic_band;
+    double elastic_band_height = 3.0;
+    std::string elastic_band_topic = "rt/elastic_band";
     int band_attached_link = 0;
+
+    int enable_scene_reset = 0;
+    std::string scene_reset_topic = "rt/reset_category";
+    std::string dolly_reset_topic = "rt/reset_dolly";
+    std::string scene_reset_body = "dolly";
+    SceneResetPoseConfig scene_reset_pose;
 
     int publish_object_pose = 0;
     std::string object_pose_body = "dolly";
@@ -57,6 +76,63 @@ inline struct SimulationConfig
             joystick_bits = cfg["joystick_bits"].as<int>();
             print_scene_information = cfg["print_scene_information"].as<int>();
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
+            if (cfg["elastic_band_height"]) {
+                elastic_band_height = cfg["elastic_band_height"].as<double>();
+            }
+            if (cfg["elastic_band_topic"]) {
+                elastic_band_topic = cfg["elastic_band_topic"].as<std::string>();
+            }
+            if (cfg["enable_scene_reset"]) {
+                enable_scene_reset = cfg["enable_scene_reset"].as<int>();
+            }
+            if (cfg["scene_reset_topic"]) {
+                scene_reset_topic = cfg["scene_reset_topic"].as<std::string>();
+            }
+            if (cfg["dolly_reset_topic"]) {
+                dolly_reset_topic = cfg["dolly_reset_topic"].as<std::string>();
+            }
+            if (cfg["scene_reset_body"]) {
+                scene_reset_body = cfg["scene_reset_body"].as<std::string>();
+            }
+            if (cfg["scene_reset_pose"]) {
+                const auto pose = cfg["scene_reset_pose"];
+                auto read_vector3 = [](const YAML::Node& node, const std::string& name) {
+                    if (!node || !node.IsSequence() || node.size() != 3) {
+                        throw std::runtime_error(name + " must contain exactly [x, y, z]");
+                    }
+                    std::array<double, 3> value = {
+                        node[0].as<double>(), node[1].as<double>(), node[2].as<double>()};
+                    for (const double component : value) {
+                        if (!std::isfinite(component)) {
+                            throw std::runtime_error(name + " must contain only finite values");
+                        }
+                    }
+                    return value;
+                };
+
+                scene_reset_pose.position = read_vector3(
+                    pose["position"], "scene_reset_pose.position");
+                if (pose["position_margin"]) {
+                    scene_reset_pose.position_margin = read_vector3(
+                        pose["position_margin"], "scene_reset_pose.position_margin");
+                }
+                for (const double margin : scene_reset_pose.position_margin) {
+                    if (margin < 0.0) {
+                        throw std::runtime_error(
+                            "scene_reset_pose.position_margin values must be non-negative");
+                    }
+                }
+
+                scene_reset_pose.yaw = pose["yaw"] ? pose["yaw"].as<double>() : 0.0;
+                scene_reset_pose.yaw_margin =
+                    pose["yaw_margin"] ? pose["yaw_margin"].as<double>() : 0.0;
+                if (!std::isfinite(scene_reset_pose.yaw) ||
+                    !std::isfinite(scene_reset_pose.yaw_margin) ||
+                    scene_reset_pose.yaw_margin < 0.0) {
+                    throw std::runtime_error(
+                        "scene_reset_pose yaw values must be finite and yaw_margin must be non-negative");
+                }
+            }
             if (cfg["publish_object_pose"]) {
                 publish_object_pose = cfg["publish_object_pose"].as<int>();
             }

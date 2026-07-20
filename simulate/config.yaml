@@ -11,7 +11,22 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 
 print_scene_information: 0 # Print link, joint and sensors information of robot
 
-enable_elastic_band: 1 # Virtual spring band, used for lifting h1
+enable_elastic_band: 1 # Virtual spring band, used for lifting humanoid robots
+elastic_band_height: 1.7 # Default rope/elastic-band anchor height in metres
+elastic_band_topic: "rt/elastic_band" # std_msgs/msg/String: enable or disable
+
+# Reset the complete MuJoCo state and randomize the configured scene body pose.
+# Publish a non-negative integer as std_msgs/msg/String. Publish -1 for a hard
+# reset to the model defaults without pose randomization.
+enable_scene_reset: 1
+scene_reset_topic: "rt/reset_category"
+dolly_reset_topic: "rt/reset_dolly" # Any std_msgs/msg/String message resets only the dolly
+scene_reset_body: "dolly"
+scene_reset_pose:
+  position: [2.5, 0.0, 0.45]        # Centre of the sampling region [m]
+  position_margin: [1.0, 1.0, 0.0] # Uniform +/- margin on [x, y, z] [m]
+  yaw: 0.0                           # Centre yaw [rad]
+  yaw_margin: 3.14                    # Uniform +/- yaw margin [rad]
 
 publish_object_pose: 1 # Publish a MuJoCo body pose through DDS as geometry_msgs/msg/PoseStamped
 # For multiple objects, keep publish_object_pose: 1 and use this list.

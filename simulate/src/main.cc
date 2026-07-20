@@ -17,23 +17,31 @@
 #include "glfw_adapter.h"
 #undef private
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <random>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <mujoco/mujoco.h>
 #include <unitree/common/thread/recurrent_thread.hpp>
 #include <unitree/idl/ros2/PoseStamped_.hpp>
+#include <unitree/idl/ros2/String_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
+#include <unitree/robot/channel/channel_subscriber.hpp>
 #include "simulate.h"
 #include "array_safety.h"
 #include "unitree_sdk2_bridge.h"
@@ -84,10 +92,380 @@ public:
   double damping_ = 100;
   std::vector<double> point_ = {0, 0, 3};
   double length_ = 0.0;
-  bool enable_ = true;
+  std::atomic<bool> enable_{true};
   std::vector<double> f_ = {0, 0, 0};
 };
 inline ElasticBand elastic_band;
+
+std::atomic<int> pending_reset_category{0};
+std::atomic<bool> scene_reset_requested{false};
+std::atomic<bool> dolly_reset_requested{false};
+
+class SceneResetSubscriber
+{
+public:
+  using String_t = std_msgs::msg::dds_::String_;
+
+  explicit SceneResetSubscriber(const std::string &topic)
+      : subscriber_(topic)
+  {
+    subscriber_.InitChannel(
+        std::bind(&SceneResetSubscriber::messageHandler, this, std::placeholders::_1), 1);
+    std::cout << "Listening for scene reset categories on DDS topic '"
+              << topic << "'" << std::endl;
+  }
+
+private:
+  void messageHandler(const void *message)
+  {
+    const auto *reset_message = static_cast<const String_t *>(message);
+    std::istringstream input(reset_message->data());
+    int category = 0;
+    if (!(input >> category))
+    {
+      std::cerr << "Ignoring invalid scene reset category: '"
+                << reset_message->data() << "'" << std::endl;
+      return;
+    }
+
+    input >> std::ws;
+    if (!input.eof())
+    {
+      std::cerr << "Ignoring invalid scene reset category: '"
+                << reset_message->data() << "'" << std::endl;
+      return;
+    }
+
+    pending_reset_category.store(category, std::memory_order_relaxed);
+    scene_reset_requested.store(true, std::memory_order_release);
+  }
+
+  unitree::robot::ChannelSubscriber<String_t> subscriber_;
+};
+
+class DollyResetSubscriber
+{
+public:
+  using String_t = std_msgs::msg::dds_::String_;
+
+  explicit DollyResetSubscriber(const std::string &topic)
+      : subscriber_(topic)
+  {
+    subscriber_.InitChannel(
+        std::bind(&DollyResetSubscriber::messageHandler, this, std::placeholders::_1), 1);
+    std::cout << "Listening for dolly resets on DDS topic '"
+              << topic << "'" << std::endl;
+  }
+
+private:
+  void messageHandler(const void *message)
+  {
+    (void)message;
+    dolly_reset_requested.store(true, std::memory_order_release);
+  }
+
+  unitree::robot::ChannelSubscriber<String_t> subscriber_;
+};
+
+class ElasticBandSubscriber
+{
+public:
+  using String_t = std_msgs::msg::dds_::String_;
+
+  explicit ElasticBandSubscriber(const std::string &topic)
+      : subscriber_(topic)
+  {
+    subscriber_.InitChannel(
+        std::bind(&ElasticBandSubscriber::messageHandler, this, std::placeholders::_1), 1);
+    std::cout << "Listening for elastic-band controls on DDS topic '"
+              << topic << "'" << std::endl;
+  }
+
+private:
+  void messageHandler(const void *message)
+  {
+    const auto *control_message = static_cast<const String_t *>(message);
+    std::istringstream input(control_message->data());
+    std::string command;
+    if (!(input >> command))
+    {
+      std::cerr << "Ignoring empty elastic-band control message" << std::endl;
+      return;
+    }
+
+    input >> std::ws;
+    if (!input.eof())
+    {
+      std::cerr << "Ignoring invalid elastic-band control: '"
+                << control_message->data() << "'" << std::endl;
+      return;
+    }
+
+    bool enabled = false;
+    if (command == "enable" || command == "true" || command == "1")
+    {
+      enabled = true;
+    }
+    else if (command != "disable" && command != "false" && command != "0")
+    {
+      std::cerr << "Ignoring invalid elastic-band control: '"
+                << control_message->data()
+                << "' (expected enable or disable)" << std::endl;
+      return;
+    }
+
+    elastic_band.enable_.store(enabled, std::memory_order_release);
+    std::cout << "Elastic band " << (enabled ? "enabled" : "disabled")
+              << " by DDS control" << std::endl;
+  }
+
+  unitree::robot::ChannelSubscriber<String_t> subscriber_;
+};
+
+struct SceneResetPose
+{
+  std::array<mjtNum, 3> position;
+  mjtNum yaw;
+};
+
+SceneResetPose SampleSceneResetPose()
+{
+  static std::mt19937_64 random_engine(std::random_device{}());
+  const auto &config = param::config.scene_reset_pose;
+  SceneResetPose pose;
+  for (int i = 0; i < 3; ++i)
+  {
+    std::uniform_real_distribution<mjtNum> offset(
+        -config.position_margin[i], config.position_margin[i]);
+    pose.position[i] = config.position[i] + offset(random_engine);
+  }
+  std::uniform_real_distribution<mjtNum> yaw_offset(
+      -config.yaw_margin, config.yaw_margin);
+  pose.yaw = config.yaw + yaw_offset(random_engine);
+  return pose;
+}
+
+bool SetPlanarBodyPose(
+    const mjModel *model, mjData *data, int body_id, const SceneResetPose &pose)
+{
+  const int joint_count = model->body_jntnum[body_id];
+  const int first_joint = model->body_jntadr[body_id];
+  std::vector<int> slide_joints;
+  int yaw_joint = -1;
+
+  for (int offset = 0; offset < joint_count; ++offset)
+  {
+    const int joint_id = first_joint + offset;
+    if (model->jnt_type[joint_id] == mjJNT_SLIDE)
+    {
+      slide_joints.push_back(joint_id);
+    }
+    else if (model->jnt_type[joint_id] == mjJNT_HINGE)
+    {
+      const mjtNum *axis = data->xaxis + 3 * joint_id;
+      if (mju_abs(axis[2]) > 1.0 - 1e-6 && yaw_joint < 0)
+      {
+        yaw_joint = joint_id;
+      }
+    }
+  }
+
+  if (slide_joints.size() != 2)
+  {
+    return false;
+  }
+
+  const mjtNum *axis0 = data->xaxis + 3 * slide_joints[0];
+  const mjtNum *axis1 = data->xaxis + 3 * slide_joints[1];
+  const mjtNum delta[3] = {
+      pose.position[0] - data->xpos[3 * body_id],
+      pose.position[1] - data->xpos[3 * body_id + 1],
+      pose.position[2] - data->xpos[3 * body_id + 2]};
+
+  // Solve the two-axis least-squares system in world coordinates. This keeps
+  // the reset correct even when the body's planar axes are rotated in MJCF.
+  const mjtNum gram00 = mju_dot3(axis0, axis0);
+  const mjtNum gram01 = mju_dot3(axis0, axis1);
+  const mjtNum gram11 = mju_dot3(axis1, axis1);
+  const mjtNum determinant = gram00 * gram11 - gram01 * gram01;
+  if (mju_abs(determinant) < 1e-12)
+  {
+    return false;
+  }
+
+  const mjtNum projection0 = mju_dot3(axis0, delta);
+  const mjtNum projection1 = mju_dot3(axis1, delta);
+  const mjtNum displacement0 =
+      (projection0 * gram11 - projection1 * gram01) / determinant;
+  const mjtNum displacement1 =
+      (projection1 * gram00 - projection0 * gram01) / determinant;
+  mjtNum residual[3];
+  for (int i = 0; i < 3; ++i)
+  {
+    residual[i] = delta[i] - displacement0 * axis0[i] - displacement1 * axis1[i];
+  }
+  if (mju_norm3(residual) > 1e-6)
+  {
+    return false;
+  }
+
+  data->qpos[model->jnt_qposadr[slide_joints[0]]] += displacement0;
+  data->qpos[model->jnt_qposadr[slide_joints[1]]] += displacement1;
+
+  const mjtNum current_yaw = std::atan2(
+      data->xmat[9 * body_id + 3], data->xmat[9 * body_id]);
+  const mjtNum yaw_delta = std::atan2(
+      std::sin(pose.yaw - current_yaw), std::cos(pose.yaw - current_yaw));
+  if (yaw_joint < 0)
+  {
+    return mju_abs(yaw_delta) <= 1e-6;
+  }
+
+  const mjtNum yaw_axis_z = data->xaxis[3 * yaw_joint + 2];
+  data->qpos[model->jnt_qposadr[yaw_joint]] += yaw_delta / yaw_axis_z;
+  return true;
+}
+
+bool SetSceneBodyPose(
+    const mjModel *model, mjData *data, int body_id, const SceneResetPose &pose)
+{
+  const int mocap_id = model->body_mocapid[body_id];
+  const int joint_count = model->body_jntnum[body_id];
+  const int first_joint = model->body_jntadr[body_id];
+  const bool has_free_joint =
+      joint_count == 1 && first_joint >= 0 && model->jnt_type[first_joint] == mjJNT_FREE;
+  const mjtNum half_yaw = pose.yaw * 0.5;
+  const mjtNum quaternion[4] = {
+      std::cos(half_yaw), 0.0, 0.0, std::sin(half_yaw)};
+
+  if (mocap_id >= 0)
+  {
+    mju_copy3(data->mocap_pos + 3 * mocap_id, pose.position.data());
+    mju_copy4(data->mocap_quat + 4 * mocap_id, quaternion);
+    return true;
+  }
+
+  if (has_free_joint)
+  {
+    const int qpos_address = model->jnt_qposadr[first_joint];
+    mju_copy3(data->qpos + qpos_address, pose.position.data());
+    mju_copy4(data->qpos + qpos_address + 3, quaternion);
+    return true;
+  }
+
+  return SetPlanarBodyPose(model, data, body_id, pose);
+}
+
+void ResetBodyState(const mjModel *model, mjData *data, int body_id)
+{
+  const int joint_count = model->body_jntnum[body_id];
+  const int first_joint = model->body_jntadr[body_id];
+
+  for (int offset = 0; offset < joint_count; ++offset)
+  {
+    const int joint_id = first_joint + offset;
+    const int joint_type = model->jnt_type[joint_id];
+    const int qpos_size = joint_type == mjJNT_FREE ? 7
+        : joint_type == mjJNT_BALL ? 4 : 1;
+    const int dof_size = joint_type == mjJNT_FREE ? 6
+        : joint_type == mjJNT_BALL ? 3 : 1;
+    const int qpos_address = model->jnt_qposadr[joint_id];
+    const int dof_address = model->jnt_dofadr[joint_id];
+
+    mju_copy(
+        data->qpos + qpos_address, model->qpos0 + qpos_address, qpos_size);
+    mju_zero(data->qvel + dof_address, dof_size);
+    mju_zero(data->qacc_warmstart + dof_address, dof_size);
+    mju_zero(data->qfrc_applied + dof_address, dof_size);
+  }
+
+  mju_zero(data->xfrc_applied + 6 * body_id, 6);
+}
+
+bool ApplyDollyReset(mjModel *model, mjData *data)
+{
+  constexpr const char *dolly_body = "dolly";
+  const int body_id = mj_name2id(model, mjOBJ_BODY, dolly_body);
+  if (body_id < 0)
+  {
+    std::cerr << "Cannot reset dolly: MuJoCo body '" << dolly_body
+              << "' was not found" << std::endl;
+    return false;
+  }
+
+  ResetBodyState(model, data, body_id);
+  mj_forward(model, data);
+
+  const SceneResetPose pose = SampleSceneResetPose();
+  if (!SetSceneBodyPose(model, data, body_id, pose))
+  {
+    std::cerr << "Cannot reset dolly: expected a mocap body, a free joint, or "
+                 "two independent slide joints with an optional world-Z hinge"
+              << std::endl;
+    return false;
+  }
+
+  mj_forward(model, data);
+  std::cout << "Reset dolly to ["
+            << data->xpos[3 * body_id] << ", "
+            << data->xpos[3 * body_id + 1] << ", "
+            << data->xpos[3 * body_id + 2] << "] with yaw "
+            << pose.yaw << std::endl;
+  return true;
+}
+
+bool ApplySceneReset(mjModel *model, mjData *data, int category)
+{
+  if (category < -1)
+  {
+    std::cerr << "Ignoring invalid scene reset category " << category
+              << "; expected -1 or a non-negative integer" << std::endl;
+    return false;
+  }
+
+  // This restores time, integration state, qpos/qvel, controls, applied
+  // forces, mocap state and all other mjData fields to their model defaults.
+  mj_resetData(model, data);
+  mj_forward(model, data);
+
+  if (category == -1)
+  {
+    std::cout << "Hard reset complete: restored the full simulation to model defaults"
+              << std::endl;
+    return true;
+  }
+
+  const int body_id = mj_name2id(
+      model, mjOBJ_BODY, param::config.scene_reset_body.c_str());
+  if (body_id < 0)
+  {
+    std::cerr << "Full simulation reset completed, but cannot randomize MuJoCo body '"
+              << param::config.scene_reset_body << "': body was not found" << std::endl;
+    return true;
+  }
+
+  const SceneResetPose pose = SampleSceneResetPose();
+  if (!SetSceneBodyPose(model, data, body_id, pose))
+  {
+    std::cerr << "Full simulation reset completed, but cannot randomize body '"
+              << param::config.scene_reset_body
+              << "': expected a mocap body, a free joint, or two independent "
+                 "slide joints with an optional world-Z hinge; the requested "
+                 "position must be reachable by those joints"
+              << std::endl;
+    return true;
+  }
+
+  mj_forward(model, data);
+  std::cout << "Full simulation reset for category " << category
+            << ": randomized '"
+            << param::config.scene_reset_body << "' to ["
+            << data->xpos[3 * body_id] << ", "
+            << data->xpos[3 * body_id + 1] << ", "
+            << data->xpos[3 * body_id + 2] << "] with yaw " << pose.yaw
+            << std::endl;
+  return true;
+}
 
 class ObjectPosePublisher
 {
@@ -512,6 +890,27 @@ namespace
         // run only if model is present
         if (m)
         {
+          if (scene_reset_requested.exchange(false, std::memory_order_acquire))
+          {
+            const int category = pending_reset_category.load(std::memory_order_relaxed);
+            if (ApplySceneReset(m, d, category))
+            {
+              if (ctrlnoise)
+              {
+                mju_zero(ctrlnoise, m->nu);
+              }
+              sim.speed_changed = true;
+            }
+          }
+
+          if (dolly_reset_requested.exchange(false, std::memory_order_acquire))
+          {
+            if (ApplyDollyReset(m, d))
+            {
+              sim.speed_changed = true;
+            }
+          }
+
           // running
           if (sim.run)
           {
@@ -585,7 +984,7 @@ namespace
                 // elastic band on base link
                 if (param::config.enable_elastic_band == 1)
                 {
-                  if (elastic_band.enable_)
+                  if (elastic_band.enable_.load(std::memory_order_acquire))
                   {
                     std::vector<double> x = {d->qpos[0], d->qpos[1], d->qpos[2]};
                     std::vector<double> dx = {d->qvel[0], d->qvel[1], d->qvel[2]};
@@ -595,6 +994,12 @@ namespace
                     d->xfrc_applied[param::config.band_attached_link] = elastic_band.f_[0];
                     d->xfrc_applied[param::config.band_attached_link + 1] = elastic_band.f_[1];
                     d->xfrc_applied[param::config.band_attached_link + 2] = elastic_band.f_[2];
+                  }
+                  else
+                  {
+                    d->xfrc_applied[param::config.band_attached_link] = 0.0;
+                    d->xfrc_applied[param::config.band_attached_link + 1] = 0.0;
+                    d->xfrc_applied[param::config.band_attached_link + 2] = 0.0;
                   }
                 }
 
@@ -682,6 +1087,22 @@ void *UnitreeSdk2BridgeThread(void *arg)
 
   unitree::robot::ChannelFactory::Instance()->Init(param::config.domain_id, param::config.interface);
 
+  std::unique_ptr<SceneResetSubscriber> scene_reset_subscriber;
+  std::unique_ptr<DollyResetSubscriber> dolly_reset_subscriber;
+  std::unique_ptr<ElasticBandSubscriber> elastic_band_subscriber;
+  if (param::config.enable_elastic_band == 1)
+  {
+    elastic_band_subscriber =
+        std::make_unique<ElasticBandSubscriber>(param::config.elastic_band_topic);
+  }
+  if (param::config.enable_scene_reset == 1)
+  {
+    scene_reset_subscriber =
+        std::make_unique<SceneResetSubscriber>(param::config.scene_reset_topic);
+    dolly_reset_subscriber =
+        std::make_unique<DollyResetSubscriber>(param::config.dolly_reset_topic);
+  }
+
   std::vector<std::unique_ptr<ObjectPosePublisher>> object_pose_publishers;
   if (param::config.publish_object_pose == 1)
   {
@@ -740,7 +1161,8 @@ void user_key_cb(GLFWwindow* window, int key, int scancode, int act, int mods) {
   {
     if(param::config.enable_elastic_band == 1) {
       if (key==GLFW_KEY_9) {
-        elastic_band.enable_ = !elastic_band.enable_;
+        const bool enabled = elastic_band.enable_.load(std::memory_order_relaxed);
+        elastic_band.enable_.store(!enabled, std::memory_order_release);
       } else if (key==GLFW_KEY_7 || key==GLFW_KEY_UP) {
         elastic_band.length_ -= 0.1;
       } else if (key==GLFW_KEY_8 || key==GLFW_KEY_DOWN) {
@@ -789,6 +1211,7 @@ int main(int argc, char **argv)
   // Load simulation configuration
   std::filesystem::path proj_dir = std::filesystem::path(getExecutableDir()).parent_path();
   param::config.load_from_yaml(proj_dir / "config.yaml");
+  elastic_band.point_[2] = param::config.elastic_band_height;
   param::helper(argc, argv);
   if(param::config.robot_scene.is_relative()) {
     param::config.robot_scene = proj_dir.parent_path() / "unitree_robots" / param::config.robot / param::config.robot_scene;
