@@ -228,6 +228,29 @@ struct SceneResetPose
   mjtNum yaw;
 };
 
+bool collision_check(const SceneResetPose &sample_pose, int body_id ,mjData *data)
+{
+  
+
+  mjtNum x = sample_pose.position[0];
+  mjtNum y = sample_pose.position[1];
+
+  // World-frame XYZ position of the body's inertial frame / body frame.
+  const mjtNum* p = data->xpos + 3 * body_id;  
+  
+  // We assume a cylinder of radius 2.0
+  //
+  mjtNum rx = p[0];
+  mjtNum ry = p[1];
+
+  const mjtNum dx = x - rx;
+  const mjtNum dy = y - ry;
+
+  constexpr mjtNum radius = 2.0;
+  // std::cout << "Current distance:" << dx * dx + dy * dy << std::endl;
+  return dx * dx + dy * dy < radius * radius;
+};
+
 SceneResetPose SampleSceneResetPose()
 {
   static std::mt19937_64 random_engine(std::random_device{}());
@@ -396,7 +419,17 @@ bool ApplyDollyReset(mjModel *model, mjData *data)
   ResetBodyState(model, data, body_id);
   mj_forward(model, data);
 
-  const SceneResetPose pose = SampleSceneResetPose();
+  SceneResetPose pose = SampleSceneResetPose();
+  const int robot_body_id = mj_name2id(model, mjOBJ_BODY, "torso_link");
+  if (robot_body_id < 0) {
+    throw std::runtime_error("torso_link body not found");
+  }
+  while (collision_check(pose, robot_body_id, data)){
+    pose = SampleSceneResetPose();
+    std::cout << "Dolly too close, sampling one more time" << std::endl;
+    std::cout << pose.position[0] << ","
+              << pose.position[1] << std::endl;
+  }
   if (!SetSceneBodyPose(model, data, body_id, pose))
   {
     std::cerr << "Cannot reset dolly: expected a mocap body, a free joint, or "
