@@ -9,7 +9,9 @@
     <material name="right_aruco_mat" texture="right_aruco_texture" texrepeat="1 1" texuniform="false" />
   </asset>
   <worldbody>
-    <body name="bottom_plate">
+    <body name="bottom_plate"
+        pos="0.6 0 0.16"
+        quat="1 0 0 0">
       <inertial pos="0.162745 -0.0106863 0.188602" quat="0.385886 0.566621 0.651465 0.325002" mass="5.1" diaginertia="1.04957 0.826815 0.464972" />
       <joint name="cart_freejoint" type="free" />
       <geom size="0.35 0.205 0.017" type="box" />
