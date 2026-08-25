@@ -1466,6 +1466,7 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
         std::make_unique<SceneResetSubscriber>(param::config.scene_reset_topic);
     dolly_reset_subscriber =
         std::make_unique<DollyResetSubscriber>(param::config.dolly_reset_topic);
+  }
   std::unique_ptr<CameraVideoPublisher> camera_publisher;
   if (param::config.publish_camera == 1)
   {
