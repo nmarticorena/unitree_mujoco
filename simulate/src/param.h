@@ -63,11 +63,12 @@ inline struct SimulationConfig
 
     int publish_camera = 0;
     std::string camera_name = "head_camera";
-    std::string camera_topic = "rt/head_camera/front_video";
-    std::string camera_frame = "head_camera";
     int camera_width = 640;
     int camera_height = 480;
     int camera_rate_hz = 15;
+    int camera_zmq_port = 55555;
+    int camera_request_port = 60000;
+    int camera_jpeg_quality = 85;
 
     void load_from_yaml(const std::string &filename)
     {
@@ -162,12 +163,6 @@ inline struct SimulationConfig
             if (cfg["camera_name"]) {
                 camera_name = cfg["camera_name"].as<std::string>();
             }
-            if (cfg["camera_topic"]) {
-                camera_topic = cfg["camera_topic"].as<std::string>();
-            }
-            if (cfg["camera_frame"]) {
-                camera_frame = cfg["camera_frame"].as<std::string>();
-            }
             if (cfg["camera_width"]) {
                 camera_width = cfg["camera_width"].as<int>();
             }
@@ -176,6 +171,15 @@ inline struct SimulationConfig
             }
             if (cfg["camera_rate_hz"]) {
                 camera_rate_hz = cfg["camera_rate_hz"].as<int>();
+            }
+            if (cfg["camera_zmq_port"]) {
+                camera_zmq_port = cfg["camera_zmq_port"].as<int>();
+            }
+            if (cfg["camera_request_port"]) {
+                camera_request_port = cfg["camera_request_port"].as<int>();
+            }
+            if (cfg["camera_jpeg_quality"]) {
+                camera_jpeg_quality = cfg["camera_jpeg_quality"].as<int>();
             }
             if (cfg["object_pose_publishers"]) {
                 object_pose_publishers.clear();
@@ -215,13 +219,14 @@ inline po::variables_map helper(int argc, char** argv)
         ("object_pose_topic", po::value<std::string>(&config.object_pose_topic), "DDS topic for the object PoseStamped")
         ("object_pose_frame", po::value<std::string>(&config.object_pose_frame), "Frame id for the object PoseStamped")
         ("object_pose_rate_hz", po::value<int>(&config.object_pose_rate_hz), "Object pose publishing rate in Hz")
-        ("publish_camera", po::value<int>(&config.publish_camera), "Publish a MuJoCo camera through DDS; 0 or 1")
+        ("publish_camera", po::value<int>(&config.publish_camera), "Publish a MuJoCo camera through ZMQ; 0 or 1")
         ("camera_name", po::value<std::string>(&config.camera_name), "MuJoCo camera name to render")
-        ("camera_topic", po::value<std::string>(&config.camera_topic), "DDS topic for Go2FrontVideoData camera payload")
-        ("camera_frame", po::value<std::string>(&config.camera_frame), "Frame id encoded in camera metadata")
         ("camera_width", po::value<int>(&config.camera_width), "Camera render width")
         ("camera_height", po::value<int>(&config.camera_height), "Camera render height")
         ("camera_rate_hz", po::value<int>(&config.camera_rate_hz), "Camera publishing rate in Hz")
+        ("camera_zmq_port", po::value<int>(&config.camera_zmq_port), "ZMQ JPEG PUB port")
+        ("camera_request_port", po::value<int>(&config.camera_request_port), "TeleImager configuration REP port")
+        ("camera_jpeg_quality", po::value<int>(&config.camera_jpeg_quality), "JPEG quality from 1 to 100")
     ;
 
     po::variables_map vm;

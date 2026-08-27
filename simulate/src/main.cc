@@ -30,7 +30,6 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -42,11 +41,12 @@
 
 #include <mujoco/mujoco.h>
 #include <unitree/common/thread/recurrent_thread.hpp>
-#include <unitree/idl/go2/Go2FrontVideoData_.hpp>
 #include <unitree/idl/ros2/PoseStamped_.hpp>
 #include <unitree/idl/ros2/String_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
+#include <turbojpeg.h>
+#include <zmq.h>
 #include "simulate.h"
 #include "array_safety.h"
 #include "unitree_sdk2_bridge.h"
@@ -637,22 +637,20 @@ namespace
     sim.camera = camera_id + 2;  // UI entries are: Free, Tracking, then fixed cameras.
   }
 
-  class CameraVideoPublisher
+  class CameraZmqServer
   {
   public:
-    using VideoMsg_t = unitree_go::msg::dds_::Go2FrontVideoData_;
-
-    CameraVideoPublisher(mj::Simulate *sim, GLFWwindow *render_window)
+    CameraZmqServer(mj::Simulate *sim, GLFWwindow *render_window)
         : sim_(sim),
-          render_window_(render_window),
-          publisher_(param::config.camera_topic)
+          render_window_(render_window)
     {
       width_ = std::max(1, param::config.camera_width);
       height_ = std::max(1, param::config.camera_height);
       rate_hz_ = std::max(1, param::config.camera_rate_hz);
+      jpeg_quality_ = std::clamp(param::config.camera_jpeg_quality, 1, 100);
     }
 
-    ~CameraVideoPublisher()
+    ~CameraZmqServer()
     {
       stop();
     }
@@ -665,13 +663,8 @@ namespace
         return false;
       }
 
-      publisher_.InitChannel();
       running_.store(true);
-      thread_ = std::thread(&CameraVideoPublisher::loop, this);
-      std::cout << "Publishing MuJoCo camera '" << param::config.camera_name
-                << "' on DDS topic '" << param::config.camera_topic
-                << "' at " << width_ << "x" << height_
-                << " @ " << rate_hz_ << " Hz" << std::endl;
+      thread_ = std::thread(&CameraZmqServer::loop, this);
       return true;
     }
 
@@ -692,21 +685,115 @@ namespace
       mjv_defaultOption(&option_);
       mjr_defaultContext(&context_);
 
+      void *zmq_context = zmq_ctx_new();
+      void *publisher = zmq_context ? zmq_socket(zmq_context, ZMQ_PUB) : nullptr;
+      void *responder = zmq_context ? zmq_socket(zmq_context, ZMQ_REP) : nullptr;
+      if (!zmq_context || !publisher || !responder)
+      {
+        std::cerr << "Camera ZMQ server failed to start: " << zmq_strerror(zmq_errno())
+                  << std::endl;
+        closeZmq(zmq_context, publisher, responder);
+        glfwMakeContextCurrent(nullptr);
+        return;
+      }
+
+      const int high_water_mark = 1;
+      const int linger = 0;
+      zmq_setsockopt(publisher, ZMQ_SNDHWM, &high_water_mark, sizeof(high_water_mark));
+      zmq_setsockopt(publisher, ZMQ_LINGER, &linger, sizeof(linger));
+      zmq_setsockopt(responder, ZMQ_LINGER, &linger, sizeof(linger));
+
+      const std::string publish_endpoint =
+          "tcp://*:" + std::to_string(param::config.camera_zmq_port);
+      const std::string request_endpoint =
+          "tcp://*:" + std::to_string(param::config.camera_request_port);
+      if (zmq_bind(publisher, publish_endpoint.c_str()) != 0 ||
+          zmq_bind(responder, request_endpoint.c_str()) != 0)
+      {
+        std::cerr << "Camera ZMQ server failed to start: " << zmq_strerror(zmq_errno())
+                  << std::endl;
+        closeZmq(zmq_context, publisher, responder);
+        glfwMakeContextCurrent(nullptr);
+        return;
+      }
+
+      compressor_ = tjInitCompress();
+      if (!compressor_)
+      {
+        std::cerr << "Camera JPEG encoder failed to start: " << tjGetErrorStr()
+                  << std::endl;
+        closeZmq(zmq_context, publisher, responder);
+        glfwMakeContextCurrent(nullptr);
+        return;
+      }
+
+      std::cout << "Publishing MuJoCo camera '" << param::config.camera_name
+                << "' as JPEG on " << publish_endpoint << " at "
+                << width_ << "x" << height_ << " @ " << rate_hz_
+                << " Hz; configuration REP on " << request_endpoint << std::endl;
+
       const auto period = std::chrono::microseconds(1000000 / rate_hz_);
+      auto next_frame = std::chrono::steady_clock::now();
       while (running_.load() && !sim_->exitrequest.load())
       {
-        const auto start = std::chrono::steady_clock::now();
-        publishFrame();
-
-        const auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed < period)
+        respondToConfigRequest(responder);
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_frame)
         {
-          std::this_thread::sleep_for(period - elapsed);
+          publishFrame(publisher);
+          next_frame = std::chrono::steady_clock::now() + period;
+        }
+        else
+        {
+          std::this_thread::sleep_until(
+              std::min(next_frame, now + std::chrono::milliseconds(10)));
         }
       }
 
       releaseModelResources();
+      tjDestroy(compressor_);
+      compressor_ = nullptr;
+      closeZmq(zmq_context, publisher, responder);
       glfwMakeContextCurrent(nullptr);
+    }
+
+    static void closeZmq(void *context, void *publisher, void *responder)
+    {
+      if (publisher)
+      {
+        zmq_close(publisher);
+      }
+      if (responder)
+      {
+        zmq_close(responder);
+      }
+      if (context)
+      {
+        zmq_ctx_term(context);
+      }
+    }
+
+    void respondToConfigRequest(void *responder) const
+    {
+      char request[32];
+      if (zmq_recv(responder, request, sizeof(request), ZMQ_DONTWAIT) < 0)
+      {
+        return;
+      }
+
+      std::ostringstream json;
+      json << "{\"head_camera\":{"
+           << "\"enable_zmq\":true,"
+           << "\"zmq_port\":" << param::config.camera_zmq_port << ","
+           << "\"enable_webrtc\":false,"
+           << "\"type\":\"mujoco\","
+           << "\"image_shape\":[" << height_ << "," << width_ << "],"
+           << "\"binocular\":false,"
+           << "\"fps\":" << rate_hz_ << "},"
+           << "\"left_wrist_camera\":{\"enable_zmq\":false,\"enable_webrtc\":false},"
+           << "\"right_wrist_camera\":{\"enable_zmq\":false,\"enable_webrtc\":false}}";
+      const std::string response = json.str();
+      zmq_send(responder, response.data(), response.size(), 0);
     }
 
     bool ensureModelResources(const mjModel *model)
@@ -734,15 +821,11 @@ namespace
       context_ready_ = true;
       mjr_resizeOffscreen(width_, height_, &context_);
       mjr_setBuffer(mjFB_OFFSCREEN, &context_);
-      context_.readDepthMap = mjDEPTH_ZERONEAR;
-
       raw_rgb_.resize(static_cast<size_t>(width_) * height_ * 3);
-      rgb_topdown_.resize(raw_rgb_.size());
-      raw_depth_.resize(static_cast<size_t>(width_) * height_);
-      metric_depth_.resize(raw_depth_.size());
-      depth_bytes_.resize(raw_depth_.size() * sizeof(float));
+      jpeg_capacity_ = tjBufSize(width_, height_, TJSAMP_420);
+      jpeg_buffer_ = tjAlloc(jpeg_capacity_);
 
-      return true;
+      return jpeg_buffer_ != nullptr;
     }
 
     void releaseModelResources()
@@ -759,16 +842,15 @@ namespace
       }
       model_ = nullptr;
       camera_id_ = -1;
+      if (jpeg_buffer_)
+      {
+        tjFree(jpeg_buffer_);
+        jpeg_buffer_ = nullptr;
+      }
     }
 
-    void publishFrame()
+    void publishFrame(void *publisher)
     {
-      double sim_time = 0.0;
-      double znear = 0.0;
-      double zfar = 0.0;
-      std::array<double, 3> camera_position = {};
-      std::array<double, 4> camera_quaternion = {};
-
       {
         const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
         if (!m || !d)
@@ -786,129 +868,39 @@ namespace
         camera.type = mjCAMERA_FIXED;
         camera.fixedcamid = camera_id_;
 
-        // Refresh derived positions so the fixed camera follows qpos changes
-        // made outside the normal stepping path, including paused UI edits.
-        mj_fwdPosition(m, d);
-
-        const mjtNum *cam_xpos = d->cam_xpos + 3 * camera_id_;
-        const mjtNum *cam_xmat = d->cam_xmat + 9 * camera_id_;
-        mjtNum cam_quat[4] = {};
-        mju_mat2Quat(cam_quat, cam_xmat);
-        for (int i = 0; i < 3; ++i)
-        {
-          camera_position[i] = cam_xpos[i];
-        }
-        for (int i = 0; i < 4; ++i)
-        {
-          camera_quaternion[i] = cam_quat[i];
-        }
-
         const mjrRect viewport = {0, 0, width_, height_};
         mjv_updateScene(m, d, &option_, nullptr, &camera, mjCAT_ALL, &scene_);
         mjr_setBuffer(mjFB_OFFSCREEN, &context_);
         mjr_render(viewport, &scene_, &context_);
-        mjr_readPixels(raw_rgb_.data(), raw_depth_.data(), viewport, &context_);
-
-        sim_time = d->time;
-        znear = m->vis.map.znear * m->stat.extent;
-        zfar = m->vis.map.zfar * m->stat.extent;
+        mjr_readPixels(raw_rgb_.data(), nullptr, viewport, &context_);
       }
 
-      packTopDownRgb();
-      packMetricDepth(znear, zfar);
-
-      VideoMsg_t msg;
-      const auto publish_time_ns = static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-              std::chrono::steady_clock::now().time_since_epoch())
-              .count());
-      msg.time_frame(publish_time_ns);
-      msg.video720p(rgb_topdown_);
-      msg.video360p(depth_bytes_);
-      msg.video180p(makeMetadata(sim_time, camera_position, camera_quaternion));
-      publisher_.Write(msg);
-    }
-
-    void packTopDownRgb()
-    {
-      const size_t row_bytes = static_cast<size_t>(width_) * 3;
-      for (int row = 0; row < height_; ++row)
+      unsigned long jpeg_size = jpeg_capacity_;
+      if (tjCompress2(compressor_, raw_rgb_.data(), width_, 0, height_, TJPF_RGB,
+                      &jpeg_buffer_, &jpeg_size, TJSAMP_420, jpeg_quality_,
+                      TJFLAG_BOTTOMUP | TJFLAG_FASTDCT | TJFLAG_NOREALLOC) != 0)
       {
-        const size_t src = static_cast<size_t>(height_ - 1 - row) * row_bytes;
-        const size_t dst = static_cast<size_t>(row) * row_bytes;
-        std::copy(raw_rgb_.begin() + src, raw_rgb_.begin() + src + row_bytes,
-                  rgb_topdown_.begin() + dst);
+        std::cerr << "Camera JPEG encoding failed: " << tjGetErrorStr2(compressor_)
+                  << std::endl;
+        return;
       }
-    }
-
-    void packMetricDepth(double znear, double zfar)
-    {
-      if (znear <= 0.0 || zfar <= znear)
-      {
-        std::fill(metric_depth_.begin(), metric_depth_.end(),
-                  std::numeric_limits<float>::quiet_NaN());
-      }
-      else
-      {
-        for (int row = 0; row < height_; ++row)
-        {
-          for (int col = 0; col < width_; ++col)
-          {
-            const size_t src = static_cast<size_t>(height_ - 1 - row) * width_ + col;
-            const size_t dst = static_cast<size_t>(row) * width_ + col;
-            double depth = raw_depth_[src];
-            if (context_.readDepthMap == mjDEPTH_ZEROFAR)
-            {
-              depth = 1.0 - depth;
-            }
-            depth = std::clamp(depth, 0.0, 1.0);
-            metric_depth_[dst] = static_cast<float>(
-                znear * zfar / (zfar - depth * (zfar - znear)));
-          }
-        }
-      }
-
-      std::memcpy(depth_bytes_.data(), metric_depth_.data(), depth_bytes_.size());
-    }
-
-    std::vector<uint8_t> makeMetadata(double sim_time,
-                                      const std::array<double, 3> &camera_position,
-                                      const std::array<double, 4> &camera_quaternion) const
-    {
-      char metadata[1024];
-      const int n = std::snprintf(
-          metadata, sizeof(metadata),
-          "unitree_mujoco_camera_v1;"
-          "camera=%s;frame=%s;width=%d;height=%d;"
-          "video720p=rgb8;video360p=32FC1_meters;origin=top_left;"
-          "time_frame=publish_monotonic_ns;sim_time=%.9f;"
-          "camera_pos_world=%.9g,%.9g,%.9g;"
-          "camera_quat_world_wxyz=%.9g,%.9g,%.9g,%.9g",
-          param::config.camera_name.c_str(), param::config.camera_frame.c_str(),
-          width_, height_, sim_time,
-          camera_position[0], camera_position[1], camera_position[2],
-          camera_quaternion[0], camera_quaternion[1],
-          camera_quaternion[2], camera_quaternion[3]);
-
-      if (n <= 0)
-      {
-        return {};
-      }
-      const size_t size = std::min(static_cast<size_t>(n), sizeof(metadata) - 1);
-      return std::vector<uint8_t>(metadata, metadata + size);
+      zmq_send(publisher, jpeg_buffer_, jpeg_size, ZMQ_DONTWAIT);
     }
 
     mj::Simulate *sim_ = nullptr;
     GLFWwindow *render_window_ = nullptr;
-    unitree::robot::ChannelPublisher<VideoMsg_t> publisher_;
     std::atomic_bool running_{false};
     std::thread thread_;
+    tjhandle compressor_ = nullptr;
+    unsigned char *jpeg_buffer_ = nullptr;
+    unsigned long jpeg_capacity_ = 0;
 
     const mjModel *model_ = nullptr;
     int camera_id_ = -1;
     int width_ = 640;
     int height_ = 480;
     int rate_hz_ = 15;
+    int jpeg_quality_ = 85;
     bool scene_ready_ = false;
     bool context_ready_ = false;
 
@@ -916,10 +908,6 @@ namespace
     mjvOption option_ = {};
     mjrContext context_ = {};
     std::vector<unsigned char> raw_rgb_;
-    std::vector<uint8_t> rgb_topdown_;
-    std::vector<float> raw_depth_;
-    std::vector<float> metric_depth_;
-    std::vector<uint8_t> depth_bytes_;
   };
 
   GLFWwindow *CreateHiddenCameraWindow()
@@ -1467,11 +1455,11 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
     dolly_reset_subscriber =
         std::make_unique<DollyResetSubscriber>(param::config.dolly_reset_topic);
   }
-  std::unique_ptr<CameraVideoPublisher> camera_publisher;
+  std::unique_ptr<CameraZmqServer> camera_server;
   if (param::config.publish_camera == 1)
   {
-    camera_publisher = std::make_unique<CameraVideoPublisher>(sim, camera_window);
-    camera_publisher->start();
+    camera_server = std::make_unique<CameraZmqServer>(sim, camera_window);
+    camera_server->start();
   }
 
   std::vector<std::unique_ptr<ObjectPosePublisher>> object_pose_publishers;

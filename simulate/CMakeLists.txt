@@ -13,6 +13,9 @@ endif()
 find_package(unitree_sdk2 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(mujoco REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZMQ REQUIRED IMPORTED_TARGET libzmq)
+pkg_check_modules(TURBOJPEG REQUIRED IMPORTED_TARGET libturbojpeg)
 # find_package(iceoryx-cxx REQUIRED)
 find_package(iceoryx_platform REQUIRED)
 find_package(iceoryx_posh CONFIG REQUIRED)
@@ -31,5 +34,10 @@ link_libraries(
 )
 
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
-target_link_libraries(unitree_mujoco mujoco::mujoco mujoco::libmujoco_simulate)
+target_link_libraries(unitree_mujoco
+  mujoco::mujoco
+  mujoco::libmujoco_simulate
+  PkgConfig::ZMQ
+  PkgConfig::TURBOJPEG
+)
 add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
