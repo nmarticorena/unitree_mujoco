@@ -9,6 +9,7 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,6 +18,7 @@
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
 #include <unitree/dds_wrapper/robots/go2/go2.h>
+#include <unitree/idl/ros2/String_.hpp>
 
 
 #include <unitree/common/time/time_tool.hpp>
@@ -706,7 +708,9 @@ int main(int argc, const char **argv)
     }
     std::cout << "Press enter to start";
     std::cin.get();
-    LocomotionPolicyController controller(argv[1]);
+    LocomotionPolicyController controller(
+        argc >= 2 ? argv[1] : "mjlab.onnx"
+    );
     controller.init();
 
     while (true)

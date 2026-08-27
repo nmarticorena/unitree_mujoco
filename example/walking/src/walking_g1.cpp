@@ -761,7 +761,9 @@ int main(int argc, const char **argv)
     }
     std::cout << "Press enter to start";
     std::cin.get();
-    LocomotionPolicyController controller(argv[1]);
+    LocomotionPolicyController controller(
+        argc >= 2 ? argv[1] : "policy.onnx"
+    );
     controller.init();
 
     while (true)
