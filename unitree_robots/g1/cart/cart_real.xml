@@ -1,12 +1,10 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mujoco model="cart_example">
+  <compiler angle="radian" />
   <asset>
-    <mesh name="left_aruco_mesh" file="aruco/left_aruco_mesh.obj" />
-    <texture name="left_aruco_texture" type="2d" file="aruco/left_aruco_4x4_50_id0_rot90.png" />
-    <material name="left_aruco_mat" texture="left_aruco_texture" texrepeat="1 1" texuniform="false" />
-    <mesh name="right_aruco_mesh" file="aruco/right_aruco_mesh.obj" />
-    <texture name="right_aruco_texture" type="2d" file="aruco/right_aruco_4x4_50_id1_rot90.png" />
-    <material name="right_aruco_mat" texture="right_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="aruco_mesh" file="aruco/left_aruco_mesh.obj" />
+    <texture name="aruco_texture" type="2d" file="aruco/left_aruco_4x4_50_id0_rot90.png" />
+    <material name="aruco_mat" texture="aruco_texture" texrepeat="1 1" texuniform="false" />
   </asset>
   <worldbody>
     <body name="bottom_plate"
@@ -15,30 +13,33 @@
       <inertial pos="0.162745 -0.0106863 0.188602" quat="0.385886 0.566621 0.651465 0.325002" mass="5.1" diaginertia="1.04957 0.826815 0.464972" />
       <joint name="cart_freejoint" type="free" />
       <geom size="0.35 0.205 0.017" type="box" />
-      <geom name="left_aruco_geom" pos="-0.4 0.205 0.545" quat="0.92388 0 -0.382683 0" type="mesh" contype="0" material="left_aruco_mat" mesh="left_aruco_mesh" />
-      <geom name="right_aruco_geom" pos="-0.4 -0.205 0.545" quat="0.92388 0 -0.382683 0" type="mesh" contype="0" material="right_aruco_mat" mesh="right_aruco_mesh" />
-      <geom size="0.0127 0.07" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 0.199862 0.575831" quat="0.995185 0.0980174 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 0.180092 0.623561" quat="0.95694 0.290285 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 0.143561 0.660092" quat="0.881921 0.471397 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 0.095831 0.679862" quat="0.77301 0.634393 0 0" type="cylinder" />
+      <geom name="aruco_geom" pos="0 0.0 0.567" quat="1.0 0 0 0" type="mesh" contype="0" material="aruco_mat" mesh="aruco_mesh" />
+      <geom size="0.0127 0.1075" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="-0.35 0.205 0.275" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 -0.199862 0.575831" quat="0.995185 -0.0980174 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 -0.180092 0.623561" quat="0.95694 -0.290285 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 -0.143561 0.660092" quat="0.881921 -0.471397 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="-0.35 -0.095831 0.679862" quat="0.77301 -0.634393 0 0" type="cylinder" />
+      <geom size="0.0127 0.01875" pos="-0.35 0.205 0.56875" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 -0.201289 0.606156" quat="0.995185 -0.0980174 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 -0.187011 0.640627" quat="0.95694 -0.290285 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="-0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="-0.35 -0.205 0.275" type="cylinder" />
-      <geom size="0.0127 0.07" pos="0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 0.199862 0.575831" quat="0.995185 0.0980174 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 0.180092 0.623561" quat="0.95694 0.290285 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 0.143561 0.660092" quat="0.881921 0.471397 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 0.095831 0.679862" quat="0.77301 0.634393 0 0" type="cylinder" />
+      <geom size="0.0127 0.01875" pos="-0.35 -0.205 0.56875" type="cylinder" />
+      <geom size="0.0127 0.1075" pos="0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 0.205 0.275" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 -0.199862 0.575831" quat="0.995185 -0.0980174 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 -0.180092 0.623561" quat="0.95694 -0.290285 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 -0.143561 0.660092" quat="0.881921 -0.471397 0 0" type="cylinder" />
-      <geom size="0.0127 0.026337" pos="0.35 -0.095831 0.679862" quat="0.77301 -0.634393 0 0" type="cylinder" />
+      <geom size="0.0127 0.01875" pos="0.35 0.205 0.56875" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 -0.201289 0.606156" quat="0.995185 -0.0980174 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 -0.187011 0.640627" quat="0.95694 -0.290285 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
+      <geom size="0.0127 0.0190215" pos="0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 -0.205 0.275" type="cylinder" />
+      <geom size="0.0127 0.01875" pos="0.35 -0.205 0.56875" type="cylinder" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.28" type="box" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.55" type="box" />
       <body name="back_left_wheel_caster" pos="-0.35 0.205 -0.04">
