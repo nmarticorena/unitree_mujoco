@@ -9,6 +9,7 @@ find_package(Eigen3 REQUIRED CONFIG)
 message(STATUS "ONNX Runtime includes: ${ONNX_RUNTIME_LIB}")
 add_executable(walking_g1 src/walking_g1.cpp)
 add_executable(walking_g1_mjlab src/walking_g1_mjlab.cpp)
+add_executable(arm_sdk_upper_body src/arm_sdk_upper_body.cpp)
 option(onnxruntime_USE_CUDA "Build with CUDA support" OFF) # Lets start with cpu
 
 
@@ -21,6 +22,8 @@ target_link_libraries(walking_g1_mjlab PRIVATE
   unitree_sdk2 
   onnxruntime::onnxruntime
   Eigen3::Eigen)
+
+target_link_libraries(arm_sdk_upper_body PRIVATE unitree_sdk2)
 
 
 SET(CMAKE_BUILD_TYPE Release)
