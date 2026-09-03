@@ -1,0 +1,13 @@
+<mujoco model="g1 lego hands asset">
+  <include file="g1_29dof_lego_hands.xml"/>
+
+  <!-- The source model normally receives these defaults from cart_scene.xml. -->
+  <default>
+    <default class="visual">
+      <geom group="2" type="mesh" contype="0" conaffinity="0" mass="0"/>
+    </default>
+    <default class="collision">
+      <geom group="3" contype="1" conaffinity="1" mass="0"/>
+    </default>
+  </default>
+</mujoco>

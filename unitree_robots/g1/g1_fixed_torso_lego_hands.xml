@@ -1,0 +1,20 @@
+<mujoco model="g1 fixed torso with lego hands">
+  <compiler angle="radian"/>
+
+  <asset>
+    <model name="g1_with_lego_hands" file="g1_29dof_lego_hands_asset.xml"/>
+  </asset>
+
+  <worldbody>
+    <!-- This mount reproduces torso_link's pose in the full robot's zero configuration. -->
+    <body name="fixed_torso_mount" pos="-0.0039635 0 0.828">
+      <attach model="g1_with_lego_hands" body="torso_link" prefix="fixed_"/>
+    </body>
+  </worldbody>
+
+  <!-- torso_link owns the waist-pitch joint in the source model; lock it to the mount. -->
+  <equality>
+    <joint name="fixed_torso_pose" joint1="fixed_waist_pitch_joint" polycoef="0 0 0 0 0"
+      solref="0.004 1"/>
+  </equality>
+</mujoco>
