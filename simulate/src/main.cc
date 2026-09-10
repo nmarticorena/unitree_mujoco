@@ -624,6 +624,18 @@ namespace
       return;
     }
 
+    if (!param::config.viewer_track_body.empty())
+    {
+      const int body_id = mj_name2id(model, mjOBJ_BODY, param::config.viewer_track_body.c_str());
+      if (body_id >= 0)
+      {
+        sim.cam.type = mjCAMERA_TRACKING;
+        sim.cam.trackbodyid = body_id;
+        sim.camera = 1;  // UI entries are: Free, Tracking, then fixed cameras.
+        return;
+      }
+    }
+
     const int camera_id = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
     if (camera_id < 0)
     {
@@ -1403,6 +1415,10 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       sim->Load(m, d, filename);
       SelectViewerCamera(*sim, m);
       mj_forward(m, d);
+      if (param::config.apply_scene_reset_on_startup == 1)
+      {
+        ApplySceneReset(m, d, 0);
+      }
 
       // allocate ctrlnoise
       free(ctrlnoise);
