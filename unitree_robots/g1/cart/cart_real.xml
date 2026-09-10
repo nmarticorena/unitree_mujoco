@@ -2,18 +2,24 @@
 <mujoco model="cart_example">
   <compiler angle="radian" />
   <asset>
-    <mesh name="aruco_mesh" file="aruco/left_aruco_mesh.obj" />
-    <texture name="aruco_texture" type="2d" file="aruco/left_aruco_4x4_50_id0_rot90.png" />
-    <material name="aruco_mat" texture="aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="front_left_aruco_mesh" file="aruco/front_left_aruco_marker.obj" />
+    <texture name="front_left_aruco_texture" type="2d" file="aruco/front_left_aruco_4x4_50_id1_rot90.png" />
+    <material name="front_left_aruco_mat" texture="front_left_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="front_middle_aruco_mesh" file="aruco/front_middle_aruco_marker.obj" />
+    <texture name="front_middle_aruco_texture" type="2d" file="aruco/front_middle_aruco_4x4_50_id2_rot90.png" />
+    <material name="front_middle_aruco_mat" texture="front_middle_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="front_right_aruco_mesh" file="aruco/front_right_aruco_marker.obj" />
+    <texture name="front_right_aruco_texture" type="2d" file="aruco/front_right_aruco_4x4_50_id3_rot90.png" />
+    <material name="front_right_aruco_mat" texture="front_right_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="middle_aruco_mesh" file="aruco/middle_aruco_marker.obj" />
+    <texture name="middle_aruco_texture" type="2d" file="aruco/middle_aruco_4x4_50_id0_rot90.png" />
+    <material name="middle_aruco_mat" texture="middle_aruco_texture" texrepeat="1 1" texuniform="false" />
   </asset>
   <worldbody>
-    <body name="bottom_plate"
-        pos="0.6 0 0.16"
-        quat="1 0 0 0">
-      <!-- <inertial pos="0.162745 -0.0106863 0.188602" quat="0.385886 0.566621 0.651465 0.325002" mass="5.1" diaginertia="1.04957 0.826815 0.464972" /> -->
+    <body name="bottom_plate">
+      <inertial pos="0.138333 -0.0189417 0.250919" quat="0.362053 0.585409 0.638874 0.343591" mass="6" diaginertia="1.23216 1.05113 0.572514" />
       <joint name="cart_freejoint" type="free" />
       <geom size="0.35 0.205 0.017" type="box" />
-      <geom name="aruco_geom" pos="0 0.0 0.567" quat="1.0 0 0 0" type="mesh" contype="0" material="aruco_mat" mesh="aruco_mesh" />
       <geom size="0.0127 0.1075" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="-0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="-0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
@@ -33,15 +39,23 @@
       <geom size="0.0127 0.0190215" pos="0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 0.205 0.275" type="cylinder" />
+      <geom name="front_left_aruco_backing" size="0.055 0.055 0.005" pos="0.25 0.155 0.567" type="box" />
+      <geom name="front_left_aruco_geom" pos="0.25 0.155 0.567" type="mesh" contype="0" material="front_left_aruco_mat" mesh="front_left_aruco_mesh" />
+      <geom name="front_middle_aruco_backing" size="0.055 0.055 0.005" pos="0.25 0 0.567" type="box" />
+      <!-- <geom name="front_middle_aruco_geom" pos="0.25 0 0.567" type="mesh" contype="0" material="front_middle_aruco_mat" mesh="front_middle_aruco_mesh" /> -->
       <geom size="0.0127 0.01875" pos="0.35 0.205 0.56875" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 -0.201289 0.606156" quat="0.995185 -0.0980174 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 -0.187011 0.640627" quat="0.95694 -0.290285 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 -0.205 0.275" type="cylinder" />
+      <geom name="front_right_aruco_backing" size="0.055 0.055 0.005" pos="0.25 -0.155 0.567" type="box" />
+      <geom name="front_right_aruco_geom" pos="0.25 -0.155 0.567" type="mesh" contype="0" material="front_right_aruco_mat" mesh="front_right_aruco_mesh" />
       <geom size="0.0127 0.01875" pos="0.35 -0.205 0.56875" type="cylinder" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.28" type="box" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.55" type="box" />
+      <geom name="middle_aruco_backing" size="0.055 0.055 0.005" pos="0 0 0.572" type="box" />
+      <geom name="middle_aruco_geom" pos="0 0 0.572" type="mesh" contype="0" material="middle_aruco_mat" mesh="middle_aruco_mesh" />
       <body name="back_left_wheel_caster" pos="-0.35 0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
         <joint name="back_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.02" frictionloss="0.01" />

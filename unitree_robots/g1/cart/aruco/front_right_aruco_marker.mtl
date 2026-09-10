@@ -1,0 +1,7 @@
+newmtl front_right_aruco_marker_material
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+d 1.0
+illum 1
+map_Kd front_right_aruco_4x4_50_id3_rot90.png

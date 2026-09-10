@@ -1,0 +1,27 @@
+# Generated UV-mapped ArUco marker; outward normal is local +Z.
+mtllib middle_aruco_marker.mtl
+o middle_aruco_marker
+
+v -0.055 -0.055 0.0051
+v  0.055 -0.055 0.0051
+v  0.055  0.055 0.0051
+v -0.055  0.055 0.0051
+v -0.055 -0.055 -0.005
+v  0.055 -0.055 -0.005
+v  0.055  0.055 -0.005
+v -0.055  0.055 -0.005
+
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+
+vn 0.0 0.0 1.0
+vn 0.0 0.0 -1.0
+
+usemtl middle_aruco_marker_material
+s off
+f 1/1/1 2/2/1 3/3/1
+f 1/1/1 3/3/1 4/4/1
+f 8/1/2 7/2/2 6/3/2
+f 8/1/2 6/3/2 5/4/2
