@@ -1,5 +1,6 @@
 robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1", "h2"
-robot_scene: "cart_scene.xml" # Robot scene, /unitree_robots/[robot]/scene.xml 
+robot_scene: "scene_fixed_torso_cart_real.xml" # Robot scene, /unitree_robots/[robot]/scene.xml
+# robot_scene: "scene.xml"
 
 domain_id: 1  # Domain id
 interface: "lo" # Interface 
@@ -11,7 +12,7 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 
 print_scene_information: 0 # Print link, joint and sensors information of robot
 
-enable_elastic_band: 1 # Virtual spring band, used for lifting humanoid robots
+enable_elastic_band: 0 # Virtual spring band, used for lifting humanoid robots
 elastic_band_height: 2.4 # Default rope/elastic-band anchor height in metres
 elastic_band_topic: "rt/elastic_band" # std_msgs/msg/String: enable or disable
 
@@ -19,33 +20,37 @@ elastic_band_topic: "rt/elastic_band" # std_msgs/msg/String: enable or disable
 # Publish a non-negative integer as std_msgs/msg/String. Publish -1 for a hard
 # reset to the model defaults without pose randomization.
 enable_scene_reset: 1
+apply_scene_reset_on_startup: 1 # Apply scene_reset_pose immediately after loading the model
 scene_reset_topic: "rt/reset_category"
 dolly_reset_topic: "rt/reset_dolly" # Any std_msgs/msg/String message resets only the dolly
-scene_reset_body: "dolly"
+scene_reset_body: "bottom_plate"
 scene_reset_pose:
-  position: [0.0, 0.0, 0.45]        # Centre of the sampling region [m]
-  position_margin: [3., 3.0, 0.0] # Uniform +/- margin on [x, y, z] [m]
+  position: [0.4, 0.0, 0.]        # Fixed pose slightly in front of the robot [m]
+  position_margin: [0.0, 0.0, 0.0] # Uniform +/- margin on [x, y, z] [m]
   yaw: 0.0                           # Centre yaw [rad]
-  yaw_margin: 3.14                    # Uniform +/- yaw margin [rad]
+  yaw_margin: 0.0                     # Uniform +/- yaw margin [rad]
 
 publish_object_pose: 1 # Publish a MuJoCo body pose through DDS as geometry_msgs/msg/PoseStamped
 # For multiple objects, keep publish_object_pose: 1 and use this list.
 # When this list is present, it replaces the single object_pose_* settings above.
 object_pose_publishers:
-  - body: "dolly"
-    topic: "rt/dolly_pose"
+  - body: "bottom_plate"
+    topic: "rt/cart_pose"
     frame: "world"
     rate_hz: 50
-  - body: "pelvis"
+  - body: "fixed_torso_link"
     topic: "rt/torso_pose"
     frame: "world"
     rate_hz: 50
 
 publish_camera: 1 # Publish the MuJoCo camera as TeleImager-compatible JPEG over ZMQ
-camera_name: "head_camera"
+camera_name: "fixed_head_camera"
 camera_width: 640
 camera_height: 480
 camera_rate_hz: 15
 camera_zmq_port: 55555
 camera_request_port: 60000
 camera_jpeg_quality: 85
+
+# Start the interactive viewer in Tracking mode. This does not affect camera publishing.
+viewer_track_body: "fixed_torso_link"

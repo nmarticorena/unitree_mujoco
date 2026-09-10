@@ -49,6 +49,7 @@ inline struct SimulationConfig
     int band_attached_link = 0;
 
     int enable_scene_reset = 0;
+    int apply_scene_reset_on_startup = 0;
     std::string scene_reset_topic = "rt/reset_category";
     std::string dolly_reset_topic = "rt/reset_dolly";
     std::string scene_reset_body = "dolly";
@@ -69,6 +70,7 @@ inline struct SimulationConfig
     int camera_zmq_port = 55555;
     int camera_request_port = 60000;
     int camera_jpeg_quality = 85;
+    std::string viewer_track_body;
 
     void load_from_yaml(const std::string &filename)
     {
@@ -93,6 +95,9 @@ inline struct SimulationConfig
             }
             if (cfg["enable_scene_reset"]) {
                 enable_scene_reset = cfg["enable_scene_reset"].as<int>();
+            }
+            if (cfg["apply_scene_reset_on_startup"]) {
+                apply_scene_reset_on_startup = cfg["apply_scene_reset_on_startup"].as<int>();
             }
             if (cfg["scene_reset_topic"]) {
                 scene_reset_topic = cfg["scene_reset_topic"].as<std::string>();
@@ -181,6 +186,9 @@ inline struct SimulationConfig
             if (cfg["camera_jpeg_quality"]) {
                 camera_jpeg_quality = cfg["camera_jpeg_quality"].as<int>();
             }
+            if (cfg["viewer_track_body"]) {
+                viewer_track_body = cfg["viewer_track_body"].as<std::string>();
+            }
             if (cfg["object_pose_publishers"]) {
                 object_pose_publishers.clear();
                 for (const auto& node : cfg["object_pose_publishers"]) {
@@ -227,6 +235,7 @@ inline po::variables_map helper(int argc, char** argv)
         ("camera_zmq_port", po::value<int>(&config.camera_zmq_port), "ZMQ JPEG PUB port")
         ("camera_request_port", po::value<int>(&config.camera_request_port), "TeleImager configuration REP port")
         ("camera_jpeg_quality", po::value<int>(&config.camera_jpeg_quality), "JPEG quality from 1 to 100")
+        ("viewer_track_body", po::value<std::string>(&config.viewer_track_body), "MuJoCo body tracked by the viewer camera")
     ;
 
     po::variables_map vm;
