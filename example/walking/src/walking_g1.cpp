@@ -4,10 +4,12 @@
 #include <Eigen/Dense>
 
 #include <iostream>
+#include <csignal>
 #include <stdint.h>
 #include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/dds_wrapper/robots/g1/g1.h>
+#include <unitree/idl/go2/WirelessController_.hpp>
 #include <unitree/idl/ros2/String_.hpp>
 
 
@@ -17,9 +19,17 @@
 using namespace unitree::common;
 using namespace unitree::robot;
 
+volatile std::sig_atomic_t keep_running = 1;
+
+void handleShutdownSignal(int)
+{
+    keep_running = 0;
+}
+
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
 #define TOPIC_ARM_SDK "rt/arm_sdk"
+#define TOPIC_WIRELESS_CONTROLLER "rt/wirelesscontroller"
 
 const int G1_NUM_MOTOR = 29;
 constexpr int G1_LOW_CMD_NUM_MOTOR = 35;
@@ -32,6 +42,11 @@ constexpr int NUM_ACTIONS = 12;
 constexpr int NUM_OBS_JOINTS = 26;
 constexpr int DEFAULT_POSE_RAMP_STEPS = 100;
 constexpr int POLICY_WARMUP_STEPS = 20;
+constexpr float JOYSTICK_DEADZONE = 0.08f;
+constexpr float JOYSTICK_MAX_FORWARD_SPEED = 1.0f;
+constexpr float JOYSTICK_MAX_LATERAL_SPEED = 0.5f;
+constexpr float JOYSTICK_MAX_YAW_SPEED = 1.0f;
+constexpr uint16_t JOYSTICK_DEADMAN_RB = 1U << 0;
 
 constexpr float OBS_CLIP = 100.0f;
 constexpr float ACTION_CLIP = 100.0f;
@@ -288,10 +303,13 @@ class LocomotionPolicyController
 public:
     explicit LocomotionPolicyController(
         std::string model_path = "policy.onnx",
+        bool enable_arm_sdk = false,
+        bool enable_joystick = false,
         double dt = 0.02 // default 50Hz
     );
 
     void init();
+    void shutdown();
     void update();
     void publishCommand();
 
@@ -301,6 +319,7 @@ private:
     void LowStateMessageHandler(const void *messages);
     void ArmSdkMessageHandler(const void *messages);
     void RunCommandMessageHandler(const void *messages);
+    void JoystickMessageHandler(const void *messages);
     void setCommand(double vx, double vy, double wz, double height);
     void LowCmdWrite();
 
@@ -312,6 +331,8 @@ private:
 
 private:
     std::string model_path_;
+    bool enable_arm_sdk_;
+    bool enable_joystick_;
     double dt_;
 
     Ort::Env env_;
@@ -357,6 +378,7 @@ private:
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowState_> lowstate_subscriber;
     ChannelSubscriberPtr<unitree_hg::msg::dds_::LowCmd_> arm_sdk_subscriber;
     ChannelSubscriberPtr<std_msgs::msg::dds_::String_> velocity_subscriber;
+    ChannelSubscriberPtr<unitree_go::msg::dds_::WirelessController_> joystick_subscriber;
     double last_timestamp_{0.0f};
 
     /*LowCmd write thread*/
@@ -364,6 +386,7 @@ private:
 
     std::mutex low_state_mutex_;
     std::mutex arm_sdk_mutex_;
+    std::mutex command_mutex_;
     std::atomic<uint64_t> low_state_sequence_{0};
     std::atomic<uint64_t> arm_sdk_sequence_{0};
     uint64_t last_processed_low_state_sequence_{0};
@@ -427,17 +450,6 @@ void LocomotionPolicyController::update()
 
 void LocomotionPolicyController::publishCommand()
 {
-    unitree_hg::msg::dds_::LowCmd_ arm_sdk_cmd_copy{};
-    bool use_arm_sdk_cmd = false;
-
-    if (arm_sdk_sequence_.load(std::memory_order_acquire) > 0) {
-        std::lock_guard<std::mutex> lock(arm_sdk_mutex_);
-        arm_sdk_cmd_copy = arm_sdk_cmd;
-        use_arm_sdk_cmd =
-            arm_sdk_cmd_copy.motor_cmd()[ARM_SDK_ENABLE_INDEX].q() >
-            ARM_SDK_ENABLE_THRESHOLD;
-    }
-
     for (int i = 0; i < G1_NUM_MOTOR; ++i) {
         low_cmd.motor_cmd()[i].mode() = 0x01;
         low_cmd.motor_cmd()[i].q() = policy_buffers_.target_q[i];
@@ -447,36 +459,48 @@ void LocomotionPolicyController::publishCommand()
         low_cmd.motor_cmd()[i].tau() = 0.0f;
     }
 
-    // Keep the leg policy from owning the arm joints.
-    for (int i = 0; i < NUM_ARM_SDK_MOTORS; ++i) {
-        const int motor_idx = arm_sdk_motor_indices[i];
-        auto& dst = low_cmd.motor_cmd()[motor_idx];
+    if (enable_arm_sdk_) {
+        unitree_hg::msg::dds_::LowCmd_ arm_sdk_cmd_copy{};
+        bool use_arm_sdk_cmd = false;
 
-        if (use_arm_sdk_cmd) {
-            const auto& src = arm_sdk_cmd_copy.motor_cmd()[motor_idx];
+        if (arm_sdk_sequence_.load(std::memory_order_acquire) > 0) {
+            std::lock_guard<std::mutex> lock(arm_sdk_mutex_);
+            arm_sdk_cmd_copy = arm_sdk_cmd;
+            use_arm_sdk_cmd =
+                arm_sdk_cmd_copy.motor_cmd()[ARM_SDK_ENABLE_INDEX].q() >
+                ARM_SDK_ENABLE_THRESHOLD;
+        }
 
-            dst.mode() = src.mode();
-            dst.q() = clip(
-                src.q(),
-                joint_position_min[motor_idx],
-                joint_position_max[motor_idx]
-            );
-            dst.dq() = src.dq();
-            dst.tau() = src.tau();
-            if (src.kp() > 0.0f) {
-                dst.kp() = src.kp();
+        for (std::size_t i = 0; i < arm_sdk_motor_indices.size(); ++i) {
+            const int motor_idx = arm_sdk_motor_indices[i];
+            auto& dst = low_cmd.motor_cmd()[motor_idx];
+
+            if (use_arm_sdk_cmd) {
+                const auto& src = arm_sdk_cmd_copy.motor_cmd()[motor_idx];
+
+                dst.mode() = src.mode();
+                dst.q() = clip(
+                    src.q(),
+                    joint_position_min[motor_idx],
+                    joint_position_max[motor_idx]
+                );
+                dst.dq() = src.dq();
+                dst.tau() = src.tau();
+                if (src.kp() > 0.0f) {
+                    dst.kp() = src.kp();
+                }
+                if (src.kd() > 0.0f) {
+                    dst.kd() = src.kd();
+                }
+            } else {
+                dst.q() = clip(
+                    default_arm_joint_positions[i],
+                    joint_position_min[motor_idx],
+                    joint_position_max[motor_idx]
+                );
+                dst.dq() = 0.0f;
+                dst.tau() = 0.0f;
             }
-            if (src.kd() > 0.0f) {
-                dst.kd() = src.kd();
-            }
-        } else {
-            dst.q() = clip(
-                default_arm_joint_positions[i],
-                joint_position_min[motor_idx],
-                joint_position_max[motor_idx]
-            );
-            dst.dq() = 0.0f;
-            dst.tau() = 0.0f;
         }
     }
 
@@ -565,9 +589,13 @@ void LocomotionPolicyController::postProcessAction()
 
 LocomotionPolicyController::LocomotionPolicyController(
     std::string model_path,
+    bool enable_arm_sdk,
+    bool enable_joystick,
     double dt
 )
     : model_path_(std::move(model_path)),
+      enable_arm_sdk_(enable_arm_sdk),
+      enable_joystick_(enable_joystick),
       dt_(dt),
       env_(ORT_LOGGING_LEVEL_WARNING, "walking_g1"),
       session_options_(),
@@ -586,13 +614,33 @@ void LocomotionPolicyController::init()
     /*create subscriber*/
     lowstate_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowState_>(TOPIC_LOWSTATE));
     lowstate_subscriber->InitChannel(std::bind(&LocomotionPolicyController::LowStateMessageHandler, this, std::placeholders::_1), 1);
-    arm_sdk_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowCmd_>(TOPIC_ARM_SDK));
-    arm_sdk_subscriber->InitChannel(std::bind(&LocomotionPolicyController::ArmSdkMessageHandler, this, std::placeholders::_1), 1);
+    if (enable_arm_sdk_) {
+        arm_sdk_subscriber.reset(new ChannelSubscriber<unitree_hg::msg::dds_::LowCmd_>(TOPIC_ARM_SDK));
+        arm_sdk_subscriber->InitChannel(std::bind(&LocomotionPolicyController::ArmSdkMessageHandler, this, std::placeholders::_1), 1);
+    }
     velocity_subscriber.reset(new ChannelSubscriber<std_msgs::msg::dds_::String_>("rt/run_command/cmd"));
     velocity_subscriber->InitChannel(std::bind(&LocomotionPolicyController::RunCommandMessageHandler, this, std::placeholders::_1), 1);
+    if (enable_joystick_) {
+        joystick_subscriber.reset(new ChannelSubscriber<unitree_go::msg::dds_::WirelessController_>(TOPIC_WIRELESS_CONTROLLER));
+        joystick_subscriber->InitChannel(std::bind(&LocomotionPolicyController::JoystickMessageHandler, this, std::placeholders::_1), 1);
+        std::cout << "Joystick enabled: hold RB to drive, left stick moves, right stick turns" << std::endl;
+    }
     
     /*loop publishing thread*/
     lowCmdWriteThreadPtr = CreateRecurrentThreadEx("writebasiccmd", UT_CPU_ID_NONE, int(dt_ * 1000000), &LocomotionPolicyController::update, this);
+}
+
+void LocomotionPolicyController::shutdown()
+{
+    lowCmdWriteThreadPtr.reset();
+    arm_sdk_subscriber.reset();
+    joystick_subscriber.reset();
+
+    const unitree_hg::msg::dds_::LowCmd_ release_command{};
+    for (int i = 0; i < 5; ++i) {
+        lowcmd_publisher->Write(release_command);
+        usleep(20000);
+    }
 }
 
 void LocomotionPolicyController::LoadONNX(){
@@ -637,21 +685,46 @@ void LocomotionPolicyController::RunCommandMessageHandler(const void *message)
     double vx, vy, wz, height;
     if (iss >> vx >> vy >> wz >> height) {
         setCommand(vx, vy, wz, height);
+        std::cout << "Received command: vx=" << vx << ", vy=" << vy
+                  << ", wz=" << wz << ", height=" << height << std::endl;
     } else {
         std::cerr << "Invalid command format: " << cmd_str << std::endl;
     }
-    last_timestamp_ = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count() / 1000.0;
+}
+
+void LocomotionPolicyController::JoystickMessageHandler(const void *message)
+{
+    const auto *joystick =
+        static_cast<const unitree_go::msg::dds_::WirelessController_*>(message);
+
+    const bool deadman_pressed =
+        (joystick->keys() & JOYSTICK_DEADMAN_RB) != 0;
+    auto apply_deadzone = [](float value) {
+        return std::abs(value) < JOYSTICK_DEADZONE ? 0.0f : value;
+    };
+
+    if (deadman_pressed) {
+        setCommand(
+            apply_deadzone(joystick->ly()) * JOYSTICK_MAX_FORWARD_SPEED,
+            apply_deadzone(joystick->lx()) * JOYSTICK_MAX_LATERAL_SPEED,
+            -apply_deadzone(joystick->rx()) * JOYSTICK_MAX_YAW_SPEED,
+            default_command_[3]
+        );
+    } else {
+        setCommand(0.0, 0.0, 0.0, default_command_[3]);
+    }
 }
 
 void LocomotionPolicyController::setCommand(double vx, double vy, double wz, double height)
 {
+    std::lock_guard<std::mutex> lock(command_mutex_);
     command_[0] = static_cast<float>(vx);
     command_[1] = static_cast<float>(vy);
     command_[2] = static_cast<float>(wz);
     command_[3] = static_cast<float>(height);
-    std::cout << "Received command: vx=" << vx << ", vy=" << vy << ", wz=" << wz << ", height=" << height << std::endl;
+    last_timestamp_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count() / 1000.0;
 }
 
 // void 
@@ -702,14 +775,15 @@ void LocomotionPolicyController::buildCurrentObservation()
         std::chrono::system_clock::now().time_since_epoch()
     ).count() / 1000.0;
     
-    if (current_time - last_timestamp_ > 1.0f) {
-        for (int i = 0; i < 4; ++i) {
-            policy_buffers_.current_obs[k++] = default_command_[i];
-        }
-    } else {
-        for (int i = 0; i < 4; ++i) {
-            policy_buffers_.current_obs[k++] = command_[i];
-        }
+    std::array<float, 4> active_command{};
+    {
+        std::lock_guard<std::mutex> lock(command_mutex_);
+        active_command = current_time - last_timestamp_ > 1.0
+            ? default_command_
+            : command_;
+    }
+    for (int i = 0; i < 4; ++i) {
+        policy_buffers_.current_obs[k++] = active_command[i];
     }
 
     for (int motor_idx : obs_motor_indices) {
@@ -750,26 +824,74 @@ bool LocomotionPolicyController::buildStackedObservation(){
 
 int main(int argc, const char **argv)
 {
-       
-    if (argc < 3)
-    {
-        ChannelFactory::Instance()->Init(1, "lo");
+    std::string model_path = "policy.onnx";
+    const char* network_interface = nullptr;
+    bool enable_arm_sdk = false;
+    bool enable_joystick = false;
+    int dds_domain_id = -1;
+    int positional_argument = 0;
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (argument == "--arm-sdk") {
+            enable_arm_sdk = true;
+        } else if (argument == "--joystick") {
+            enable_joystick = true;
+        } else if (argument == "--dds-id") {
+            if (++i >= argc) {
+                std::cerr << "Missing value for --dds-id" << std::endl;
+                return 1;
+            }
+            try {
+                std::size_t parsed_characters = 0;
+                dds_domain_id = std::stoi(argv[i], &parsed_characters);
+                if (parsed_characters != std::string(argv[i]).size() ||
+                    dds_domain_id < 0) {
+                    throw std::invalid_argument("invalid DDS domain ID");
+                }
+            } catch (const std::exception&) {
+                std::cerr << "Invalid DDS domain ID: " << argv[i] << std::endl;
+                return 1;
+            }
+        } else if (positional_argument == 0) {
+            model_path = argument;
+            ++positional_argument;
+        } else if (positional_argument == 1) {
+            network_interface = argv[i];
+            ++positional_argument;
+        } else {
+            std::cerr << "Usage: " << argv[0]
+                      << " [model_path] [network_interface] [--arm-sdk]"
+                      << " [--joystick] [--dds-id id]"
+                      << std::endl;
+            return 1;
+        }
     }
-    else
-    {
-        ChannelFactory::Instance()->Init(0, argv[2]);
+
+    if (dds_domain_id < 0) {
+        dds_domain_id = network_interface == nullptr ? 1 : 0;
     }
+    ChannelFactory::Instance()->Init(
+        dds_domain_id,
+        network_interface == nullptr ? "lo" : network_interface
+    );
     std::cout << "Press enter to start";
     std::cin.get();
     LocomotionPolicyController controller(
-        argc >= 2 ? argv[1] : "policy.onnx"
+        model_path,
+        enable_arm_sdk,
+        enable_joystick
     );
+    std::signal(SIGINT, handleShutdownSignal);
+    std::signal(SIGTERM, handleShutdownSignal);
+    std::signal(SIGHUP, handleShutdownSignal);
     controller.init();
 
-    while (true)
+    while (keep_running)
     {
-        sleep(1000);
+        sleep(1);
     }
+    controller.shutdown();
 
     return 0;
 }

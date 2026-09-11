@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cmath>
 #include <cstdint>
@@ -77,6 +78,7 @@ constexpr uint16_t JOYSTICK_DEADMAN_RB = 1U << 0;
 constexpr uint16_t JOYSTICK_TRANSITION_A = 1U << 8;
 constexpr uint16_t JOYSTICK_EXIT_B = 1U << 9;
 constexpr float POLICY_TRANSITION_SECONDS = 1.0f;
+constexpr auto DOLLY_OBSERVATION_TIMEOUT = std::chrono::milliseconds(250);
 #endif
 static_assert(NUM_ACTIONS == NUM_POLICY_JOINTS);
 #ifdef MJLAB_DOLLY_TASK
@@ -329,6 +331,7 @@ private:
     void JoystickMessageHandler(const void *messages);
 #ifdef MJLAB_DOLLY_TASK
     void DollyObservationMessageHandler(const void *messages);
+    bool dollyObservationAvailable();
 #endif
 
     void copyLowStateToMotorState();
@@ -375,8 +378,9 @@ private:
     // Velocity tracking
     std::array<float, 3> velocity_{0.0f, 0.0f, 0.0f};
 #ifdef MJLAB_DOLLY_TASK
-    std::array<float, 7> dolly_observation_{1.0f, 0.0f, 0.0f, 0.0f,
+    std::array<float, 7> dolly_observation_{0.0f, 0.0f, 0.0f, 0.0f,
                                             0.0f, 0.0f, 0.0f};
+    std::chrono::steady_clock::time_point last_dolly_observation_time_{};
 #endif
 
 
@@ -550,14 +554,23 @@ void LocomotionPolicyController::runPolicy()
     };
 
 #ifdef MJLAB_DOLLY_TASK
-    const float blend_step = static_cast<float>(dt_) / POLICY_TRANSITION_SECONDS;
-    dolly_blend_ = clip(
-        dolly_blend_ +
-            (transition_to_dolly_.load(std::memory_order_relaxed)
-                 ? blend_step
-                 : -blend_step),
-        0.0f,
-        1.0f);
+    const bool dolly_requested =
+        transition_to_dolly_.load(std::memory_order_relaxed);
+    const bool markers_available = dollyObservationAvailable();
+    if (!markers_available) {
+        if (dolly_blend_ > 0.0f) {
+            std::cout << "Cart markers unavailable; using walking policy"
+                      << std::endl;
+        }
+        dolly_blend_ = 0.0f;
+    } else {
+        const float blend_step =
+            static_cast<float>(dt_) / POLICY_TRANSITION_SECONDS;
+        dolly_blend_ = clip(
+            dolly_blend_ + (dolly_requested ? blend_step : -blend_step),
+            0.0f,
+            1.0f);
+    }
 
     std::array<float, NUM_ACTIONS> locomotion_action{};
     std::array<float, NUM_ACTIONS> dolly_action{};
@@ -687,16 +700,18 @@ void LocomotionPolicyController::JoystickMessageHandler(const void *message)
         keep_running = 0;
         return;
     }
-    const bool use_dolly_policy =
+    const bool request_dolly_policy =
         (joystick->keys() & JOYSTICK_TRANSITION_A) != 0;
     const bool was_using_dolly = transition_to_dolly_.exchange(
-        use_dolly_policy, std::memory_order_relaxed);
-    if (use_dolly_policy != was_using_dolly) {
-        std::cout << (use_dolly_policy
+        request_dolly_policy, std::memory_order_relaxed);
+    if (request_dolly_policy != was_using_dolly) {
+        std::cout << (request_dolly_policy
                           ? "Transitioning to dolly behavior"
                           : "Transitioning to walking behavior")
                   << std::endl;
     }
+    const bool use_dolly_policy =
+        request_dolly_policy && dollyObservationAvailable();
 #endif
 
     const bool deadman_pressed =
@@ -740,7 +755,7 @@ void LocomotionPolicyController::DollyObservationMessageHandler(const void *mess
     std::istringstream input(observation->data());
     std::array<float, 7> values{};
     for (float& value : values) {
-        if (!(input >> value)) {
+        if (!(input >> value) || !std::isfinite(value)) {
             std::cerr << "Ignoring invalid dolly observation" << std::endl;
             return;
         }
@@ -753,6 +768,15 @@ void LocomotionPolicyController::DollyObservationMessageHandler(const void *mess
 
     std::lock_guard<std::mutex> lock(low_state_mutex_);
     dolly_observation_ = values;
+    last_dolly_observation_time_ = std::chrono::steady_clock::now();
+}
+
+bool LocomotionPolicyController::dollyObservationAvailable()
+{
+    std::lock_guard<std::mutex> lock(low_state_mutex_);
+    return dolly_observation_[0] >= 0.5f &&
+           std::chrono::steady_clock::now() - last_dolly_observation_time_ <=
+               DOLLY_OBSERVATION_TIMEOUT;
 }
 #endif
 
