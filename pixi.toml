@@ -8,14 +8,19 @@ version = "0.1.0"
 [system-requirements]
 cuda="13.0"
 
+[activation.env]
+CYCLONEDDS_URI = "file://${PIXI_PROJECT_ROOT}/simulate/cyclonedds.xml"
+
 [tasks]
 build_sim = {cmd = "cmake -S simulate -B simulate/build && cmake --build simulate/build", inputs = ["simulate/src"]}
 build_walk = {cmd = "cmake -S example/walking -B example/walking/build && cmake --build example/walking/build", inputs = ["example/walking/src"]}
 
 walk = {cmd = "./example/walking/build/walking_g1", depends-on = ["build_walk"]}
 walk_mjlab = {cmd = "./example/walking/build/walking_g1_mjlab", depends-on = ["build_walk"]}
+walk_mjlab_dolly = {cmd = "./example/walking/build/walking_g1_mjlab_dolly --joystick", depends-on = ["build_walk"]}
 arm_sdk_upper_body = {cmd = "./example/walking/build/arm_sdk_upper_body", depends-on = ["build_walk"]}
 sim = {cmd = "./simulate/build/unitree_mujoco", depends-on = ["build_sim"]}
+sim-arms = {cmd = "./simulate/build/unitree_mujoco -s scene_fixed_torso_cart_real.xml ", depends-on = ["build_sim"]}
 
 [dependencies]
 yaml-cpp = ">=0.8.0,<0.9"
@@ -41,3 +46,4 @@ onnxruntime = ">=1.26.0,<2"
 onnxruntime-cpp = ">=1.26.0,<2"
 boost = ">=1.85.0,<2"
 eigen-abi-devel = ">=5.0.1.100,<6"
+rich-click = ">=1.9.9,<2"
