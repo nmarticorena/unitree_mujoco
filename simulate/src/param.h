@@ -61,6 +61,7 @@ inline struct SimulationConfig
     std::string object_pose_frame = "world";
     int object_pose_rate_hz = 50;
     std::vector<ObjectPoseConfig> object_pose_publishers;
+    int publish_dolly_observation = 1;
 
     int publish_camera = 0;
     std::string camera_name = "head_camera";
@@ -150,6 +151,9 @@ inline struct SimulationConfig
             if (cfg["publish_object_pose"]) {
                 publish_object_pose = cfg["publish_object_pose"].as<int>();
             }
+            if (cfg["publish_dolly_observation"]) {
+                publish_dolly_observation = cfg["publish_dolly_observation"].as<int>();
+            }
             if (cfg["object_pose_body"]) {
                 object_pose_body = cfg["object_pose_body"].as<std::string>();
             }
@@ -227,6 +231,7 @@ inline po::variables_map helper(int argc, char** argv)
         ("object_pose_topic", po::value<std::string>(&config.object_pose_topic), "DDS topic for the object PoseStamped")
         ("object_pose_frame", po::value<std::string>(&config.object_pose_frame), "Frame id for the object PoseStamped")
         ("object_pose_rate_hz", po::value<int>(&config.object_pose_rate_hz), "Object pose publishing rate in Hz")
+        ("publish_dolly_observation", po::value<int>(&config.publish_dolly_observation), "Publish exact MuJoCo dolly observations over DDS; 0 or 1")
         ("publish_camera", po::value<int>(&config.publish_camera), "Publish a MuJoCo camera through ZMQ; 0 or 1")
         ("camera_name", po::value<std::string>(&config.camera_name), "MuJoCo camera name to render")
         ("camera_width", po::value<int>(&config.camera_width), "Camera render width")

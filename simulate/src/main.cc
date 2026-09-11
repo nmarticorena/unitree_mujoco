@@ -1578,8 +1578,13 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
     }
   }
 
-  DollyObservationPublisher dolly_observation_publisher(m, d);
-  dolly_observation_publisher.start();
+  std::unique_ptr<DollyObservationPublisher> dolly_observation_publisher;
+  if (param::config.publish_dolly_observation == 1)
+  {
+    dolly_observation_publisher =
+        std::make_unique<DollyObservationPublisher>(m, d);
+    dolly_observation_publisher->start();
+  }
 
   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
   if (body_id < 0) {

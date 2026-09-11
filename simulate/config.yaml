@@ -1,5 +1,5 @@
 robot: "g1"  # Robot name, "go2", "b2", "b2w", "h1", "go2w", "g1", "h2"
-robot_scene: "scene_fixed_torso_cart_real.xml" # Robot scene, /unitree_robots/[robot]/scene.xml
+robot_scene: "cart_scene.xml" # Robot scene, /unitree_robots/[robot]/scene.xml
 # robot_scene: "scene.xml"
 
 domain_id: 1  # Domain id
@@ -12,7 +12,7 @@ joystick_bits: 16 # Some game controllers may only have 8-bit accuracy
 
 print_scene_information: 0 # Print link, joint and sensors information of robot
 
-enable_elastic_band: 0 # Virtual spring band, used for lifting humanoid robots
+enable_elastic_band: 1 # Virtual spring band, used for lifting humanoid robots
 elastic_band_height: 2.4 # Default rope/elastic-band anchor height in metres
 elastic_band_topic: "rt/elastic_band" # std_msgs/msg/String: enable or disable
 
@@ -31,6 +31,7 @@ scene_reset_pose:
   yaw_margin: 0.0                     # Uniform +/- yaw margin [rad]
 
 publish_object_pose: 1 # Publish a MuJoCo body pose through DDS as geometry_msgs/msg/PoseStamped
+publish_dolly_observation: 0 # Camera process owns rt/dolly_observation; set to 1 for MuJoCo ground truth
 # For multiple objects, keep publish_object_pose: 1 and use this list.
 # When this list is present, it replaces the single object_pose_* settings above.
 object_pose_publishers:
@@ -44,7 +45,7 @@ object_pose_publishers:
     rate_hz: 50
 
 publish_camera: 1 # Publish the MuJoCo camera as TeleImager-compatible JPEG over ZMQ
-camera_name: "fixed_head_camera"
+camera_name: "head_camera"
 camera_width: 640
 camera_height: 480
 camera_rate_hz: 15
