@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cmath>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -594,6 +595,84 @@ private:
   int body_id_ = -1;
   bool enabled_ = false;
   unitree::robot::ChannelPublisher<PoseStamped_t> publisher_;
+  unitree::common::RecurrentThreadPtr thread_;
+};
+
+class DollyObservationPublisher
+{
+public:
+  using String_t = std_msgs::msg::dds_::String_;
+
+  DollyObservationPublisher(mjModel *model, mjData *data)
+      : model_(model), data_(data), publisher_("rt/dolly_observation")
+  {
+    pelvis_id_ = mj_name2id(model_, mjOBJ_BODY, "pelvis");
+    left_palm_id_ = mj_name2id(model_, mjOBJ_SITE, "left_lego_centroid");
+    right_palm_id_ = mj_name2id(model_, mjOBJ_SITE, "right_lego_centroid");
+    left_handle_id_ = mj_name2id(model_, mjOBJ_SITE, "left_hand_target");
+    right_handle_id_ = mj_name2id(model_, mjOBJ_SITE, "right_hand_target");
+    enabled_ = pelvis_id_ >= 0 && left_palm_id_ >= 0 && right_palm_id_ >= 0 &&
+               left_handle_id_ >= 0 && right_handle_id_ >= 0;
+    if (!enabled_)
+    {
+      std::cerr << "Dolly observation publisher disabled: required pelvis, palm, or handle site was not found"
+                << std::endl;
+      return;
+    }
+    publisher_.InitChannel();
+    std::cout << "Publishing exact MuJoCo dolly observations on 'rt/dolly_observation'"
+              << std::endl;
+  }
+
+  void start()
+  {
+    if (enabled_)
+    {
+      thread_ = std::make_shared<unitree::common::RecurrentThread>(
+          "dolly_obs_pub", UT_CPU_ID_NONE, 20000, [this]() { publish(); });
+    }
+  }
+
+private:
+  void appendPalmToHandle(
+      std::ostringstream &output, int palm_site_id, int handle_site_id) const
+  {
+    const mjtNum *rotation = data_->xmat + 9 * pelvis_id_;
+    const mjtNum *palm = data_->site_xpos + 3 * palm_site_id;
+    const mjtNum *handle = data_->site_xpos + 3 * handle_site_id;
+    const mjtNum delta[3] = {
+        handle[0] - palm[0], handle[1] - palm[1], handle[2] - palm[2]};
+    for (int local_axis = 0; local_axis < 3; ++local_axis)
+    {
+      mjtNum value = 0.0;
+      for (int world_axis = 0; world_axis < 3; ++world_axis)
+      {
+        value += rotation[3 * world_axis + local_axis] * delta[world_axis];
+      }
+      output << ' ' << value;
+    }
+  }
+
+  void publish()
+  {
+    std::ostringstream output;
+    output << std::setprecision(9) << 1.0;
+    appendPalmToHandle(output, left_palm_id_, left_handle_id_);
+    appendPalmToHandle(output, right_palm_id_, right_handle_id_);
+    String_t message;
+    message.data(output.str());
+    publisher_.Write(message);
+  }
+
+  mjModel *model_ = nullptr;
+  mjData *data_ = nullptr;
+  int pelvis_id_ = -1;
+  int left_palm_id_ = -1;
+  int right_palm_id_ = -1;
+  int left_handle_id_ = -1;
+  int right_handle_id_ = -1;
+  bool enabled_ = false;
+  unitree::robot::ChannelPublisher<String_t> publisher_;
   unitree::common::RecurrentThreadPtr thread_;
 };
 
@@ -1499,6 +1578,9 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
     }
   }
 
+  DollyObservationPublisher dolly_observation_publisher(m, d);
+  dolly_observation_publisher.start();
+
   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
   if (body_id < 0) {
     body_id = mj_name2id(m, mjOBJ_BODY, "base_link");
@@ -1506,7 +1588,7 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
   param::config.band_attached_link = 6 * body_id;
   
   std::unique_ptr<UnitreeSDK2BridgeBase> interface = nullptr;
-  if (m->nu > NUM_MOTOR_IDL_GO) {
+  if (param::config.robot.find("g1") != std::string::npos || m->nu > NUM_MOTOR_IDL_GO) {
     interface = std::make_unique<G1Bridge>(m, d);
   } else {
     interface = std::make_unique<Go2Bridge>(m, d);
