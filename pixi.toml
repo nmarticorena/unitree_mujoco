@@ -13,11 +13,13 @@ CYCLONEDDS_URI = "file://${PIXI_PROJECT_ROOT}/simulate/cyclonedds.xml"
 
 [tasks]
 build_sim = {cmd = "cmake -S simulate -B simulate/build && cmake --build simulate/build", inputs = ["simulate/src"]}
-build_walk = {cmd = "cmake -S example/walking -B example/walking/build && cmake --build example/walking/build", inputs = ["example/walking/src"]}
+build_walk = {cmd = "cmake -S example/walking -B example/walking/build && cmake --build example/walking/build", inputs = ["example/walking/src", "example/walking/CMakeLists.txt"]}
 
 walk = {cmd = "./example/walking/build/walking_g1", depends-on = ["build_walk"]}
 walk_mjlab = {cmd = "./example/walking/build/walking_g1_mjlab", depends-on = ["build_walk"]}
 walk_mjlab_dolly = {cmd = "./example/walking/build/walking_g1_mjlab_dolly --joystick", depends-on = ["build_walk"]}
+walk_falcon_dolly = {cmd = "./example/walking/build/walking_g1_falcon_dolly --joystick", depends-on = ["build_walk"]}
+walk_homie_dolly = {cmd = "./example/walking/build/walking_g1_homie_dolly --joystick", depends-on = ["build_walk"]}
 arm_sdk_upper_body = {cmd = "./example/walking/build/arm_sdk_upper_body", depends-on = ["build_walk"]}
 sim = {cmd = "./simulate/build/unitree_mujoco", depends-on = ["build_sim"]}
 sim-arms = {cmd = "./simulate/build/unitree_mujoco -s scene_fixed_torso_cart_real.xml ", depends-on = ["build_sim"]}
