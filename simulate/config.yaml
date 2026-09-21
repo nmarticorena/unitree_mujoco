@@ -31,7 +31,8 @@ scene_reset_pose:
   yaw_margin: 0.0                     # Uniform +/- yaw margin [rad]
 
 publish_object_pose: 1 # Publish a MuJoCo body pose through DDS as geometry_msgs/msg/PoseStamped
-publish_dolly_observation: 0 # Camera process owns rt/dolly_observation; set to 1 for MuJoCo ground truth
+publish_dolly_observation: 0 # Camera process owns rt/dolly_observation; set to 1 for MuJoCo ground truth control
+publish_dolly_observation_gt: 1 # Parallel GT reference on rt/dolly_observation_gt for camera comparison
 # For multiple objects, keep publish_object_pose: 1 and use this list.
 # When this list is present, it replaces the single object_pose_* settings above.
 object_pose_publishers:

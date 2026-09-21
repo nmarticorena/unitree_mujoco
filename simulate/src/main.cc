@@ -603,16 +603,22 @@ class DollyObservationPublisher
 public:
   using String_t = std_msgs::msg::dds_::String_;
 
-  DollyObservationPublisher(mjModel *model, mjData *data)
-      : model_(model), data_(data), publisher_("rt/dolly_observation")
+  DollyObservationPublisher(mjModel *model, mjData *data, std::string topic)
+      : model_(model), data_(data), topic_(std::move(topic)), publisher_(topic_)
   {
     pelvis_id_ = mj_name2id(model_, mjOBJ_BODY, "pelvis");
+    dolly_id_ = mj_name2id(model_, mjOBJ_BODY, "dolly");
+    if (dolly_id_ < 0)
+    {
+      dolly_id_ = mj_name2id(model_, mjOBJ_BODY, "bottom_plate");
+    }
     left_palm_id_ = mj_name2id(model_, mjOBJ_SITE, "left_lego_centroid");
     right_palm_id_ = mj_name2id(model_, mjOBJ_SITE, "right_lego_centroid");
     left_handle_id_ = mj_name2id(model_, mjOBJ_SITE, "left_hand_target");
     right_handle_id_ = mj_name2id(model_, mjOBJ_SITE, "right_hand_target");
-    enabled_ = pelvis_id_ >= 0 && left_palm_id_ >= 0 && right_palm_id_ >= 0 &&
-               left_handle_id_ >= 0 && right_handle_id_ >= 0;
+    enabled_ = pelvis_id_ >= 0 && dolly_id_ >= 0 && left_palm_id_ >= 0 &&
+               right_palm_id_ >= 0 && left_handle_id_ >= 0 &&
+               right_handle_id_ >= 0;
     if (!enabled_)
     {
       std::cerr << "Dolly observation publisher disabled: required pelvis, palm, or handle site was not found"
@@ -620,8 +626,8 @@ public:
       return;
     }
     publisher_.InitChannel();
-    std::cout << "Publishing exact MuJoCo dolly observations on 'rt/dolly_observation'"
-              << std::endl;
+    std::cout << "Publishing exact MuJoCo dolly observations on '" << topic_
+              << "'" << std::endl;
   }
 
   void start()
@@ -634,31 +640,66 @@ public:
   }
 
 private:
-  void appendPalmToHandle(
-      std::ostringstream &output, int palm_site_id, int handle_site_id) const
+  void appendPalmToHandle(std::ostringstream &output, int palm_site_id,
+                          int handle_site_id, mjtNum cart_x, mjtNum cart_y,
+                          mjtNum cart_yaw) const
   {
-    const mjtNum *rotation = data_->xmat + 9 * pelvis_id_;
+    const mjtNum *pelvis_rotation = data_->xmat + 9 * pelvis_id_;
+    const mjtNum *dolly_rotation = data_->xmat + 9 * dolly_id_;
+    const mjtNum *pelvis = data_->xpos + 3 * pelvis_id_;
+    const mjtNum *dolly = data_->xpos + 3 * dolly_id_;
     const mjtNum *palm = data_->site_xpos + 3 * palm_site_id;
     const mjtNum *handle = data_->site_xpos + 3 * handle_site_id;
-    const mjtNum delta[3] = {
-        handle[0] - palm[0], handle[1] - palm[1], handle[2] - palm[2]};
+
+    mjtNum handle_dolly[3]{};
+    mjtNum palm_pelvis[3]{};
     for (int local_axis = 0; local_axis < 3; ++local_axis)
     {
-      mjtNum value = 0.0;
       for (int world_axis = 0; world_axis < 3; ++world_axis)
       {
-        value += rotation[3 * world_axis + local_axis] * delta[world_axis];
+        handle_dolly[local_axis] +=
+            dolly_rotation[3 * world_axis + local_axis] *
+            (handle[world_axis] - dolly[world_axis]);
+        palm_pelvis[local_axis] +=
+            pelvis_rotation[3 * world_axis + local_axis] *
+            (palm[world_axis] - pelvis[world_axis]);
       }
-      output << ' ' << value;
+    }
+
+    const mjtNum cos_yaw = std::cos(cart_yaw);
+    const mjtNum sin_yaw = std::sin(cart_yaw);
+    const mjtNum target_pelvis[3] = {
+        cart_x + cos_yaw * handle_dolly[0] - sin_yaw * handle_dolly[1],
+        cart_y + sin_yaw * handle_dolly[0] + cos_yaw * handle_dolly[1],
+        dolly[2] + handle_dolly[2] - pelvis[2]};
+    for (int axis = 0; axis < 3; ++axis)
+    {
+      output << ' ' << target_pelvis[axis] - palm_pelvis[axis];
     }
   }
 
   void publish()
   {
+    const mjtNum *pelvis = data_->xpos + 3 * pelvis_id_;
+    const mjtNum *dolly = data_->xpos + 3 * dolly_id_;
+    const mjtNum *pelvis_rotation = data_->xmat + 9 * pelvis_id_;
+    const mjtNum *dolly_rotation = data_->xmat + 9 * dolly_id_;
+    const mjtNum pelvis_yaw = std::atan2(pelvis_rotation[3], pelvis_rotation[0]);
+    const mjtNum dolly_yaw = std::atan2(dolly_rotation[3], dolly_rotation[0]);
+    const mjtNum cart_yaw = std::atan2(
+        std::sin(dolly_yaw - pelvis_yaw), std::cos(dolly_yaw - pelvis_yaw));
+    const mjtNum dx = dolly[0] - pelvis[0];
+    const mjtNum dy = dolly[1] - pelvis[1];
+    const mjtNum cart_x = std::cos(pelvis_yaw) * dx + std::sin(pelvis_yaw) * dy;
+    const mjtNum cart_y = -std::sin(pelvis_yaw) * dx + std::cos(pelvis_yaw) * dy;
+
     std::ostringstream output;
-    output << std::setprecision(9) << 1.0;
-    appendPalmToHandle(output, left_palm_id_, left_handle_id_);
-    appendPalmToHandle(output, right_palm_id_, right_handle_id_);
+    output << std::setprecision(9) << 1.0 << ' ' << cart_x << ' ' << cart_y
+           << ' ' << cart_yaw;
+    appendPalmToHandle(output, left_palm_id_, left_handle_id_, cart_x, cart_y,
+                       cart_yaw);
+    appendPalmToHandle(output, right_palm_id_, right_handle_id_, cart_x, cart_y,
+                       cart_yaw);
     String_t message;
     message.data(output.str());
     publisher_.Write(message);
@@ -667,11 +708,13 @@ private:
   mjModel *model_ = nullptr;
   mjData *data_ = nullptr;
   int pelvis_id_ = -1;
+  int dolly_id_ = -1;
   int left_palm_id_ = -1;
   int right_palm_id_ = -1;
   int left_handle_id_ = -1;
   int right_handle_id_ = -1;
   bool enabled_ = false;
+  std::string topic_;
   unitree::robot::ChannelPublisher<String_t> publisher_;
   unitree::common::RecurrentThreadPtr thread_;
 };
@@ -1578,12 +1621,21 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
     }
   }
 
-  std::unique_ptr<DollyObservationPublisher> dolly_observation_publisher;
+  std::vector<std::unique_ptr<DollyObservationPublisher>>
+      dolly_observation_publishers;
   if (param::config.publish_dolly_observation == 1)
   {
-    dolly_observation_publisher =
-        std::make_unique<DollyObservationPublisher>(m, d);
-    dolly_observation_publisher->start();
+    auto publisher = std::make_unique<DollyObservationPublisher>(
+        m, d, "rt/dolly_observation");
+    publisher->start();
+    dolly_observation_publishers.push_back(std::move(publisher));
+  }
+  if (param::config.publish_dolly_observation_gt == 1)
+  {
+    auto publisher = std::make_unique<DollyObservationPublisher>(
+        m, d, "rt/dolly_observation_gt");
+    publisher->start();
+    dolly_observation_publishers.push_back(std::move(publisher));
   }
 
   int body_id = mj_name2id(m, mjOBJ_BODY, "torso_link");
