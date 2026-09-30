@@ -741,34 +741,35 @@ namespace
 
   void SelectViewerCamera(mj::Simulate &sim, const mjModel *model)
   {
-    if (!model)
-    {
-      return;
-    }
-
-    if (!param::config.viewer_track_body.empty())
-    {
-      const int body_id = mj_name2id(model, mjOBJ_BODY, param::config.viewer_track_body.c_str());
-      if (body_id >= 0)
-      {
-        sim.cam.type = mjCAMERA_TRACKING;
-        sim.cam.trackbodyid = body_id;
-        sim.camera = 1;  // UI entries are: Free, Tracking, then fixed cameras.
-        return;
-      }
-    }
-
-    const int camera_id = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
-    if (camera_id < 0)
-    {
-      sim.cam.type = mjCAMERA_FREE;
-      sim.camera = 0;
-      return;
-    }
-
-    sim.cam.type = mjCAMERA_FIXED;
-    sim.cam.fixedcamid = camera_id;
-    sim.camera = camera_id + 2;  // UI entries are: Free, Tracking, then fixed cameras.
+  sim.camera = 0;
+  //   if (!model)
+  //   {
+  //     return;
+  //   }
+  //
+  //   if (!param::config.viewer_track_body.empty())
+  //   {
+  //     const int body_id = mj_name2id(model, mjOBJ_BODY, param::config.viewer_track_body.c_str());
+  //     if (body_id >= 0)
+  //     {
+  //       sim.cam.type = mjCAMERA_TRACKING;
+  //       sim.cam.trackbodyid = body_id;
+  //       sim.camera = 1;  // UI entries are: Free, Tracking, then fixed cameras.
+  //       return;
+  //     }
+  //   }
+  //
+  //   const int camera_id = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
+  //   if (camera_id < 0)
+  //   {
+  //     sim.cam.type = mjCAMERA_FREE;
+  //     sim.camera = 0;
+  //     return;
+  //   }
+  //
+  //   sim.cam.type = mjCAMERA_FIXED;
+  //   sim.cam.fixedcamid = camera_id;
+  //   sim.camera = camera_id + 2;  // UI entries are: Free, Tracking, then fixed cameras.
   }
 
   class CameraZmqServer
