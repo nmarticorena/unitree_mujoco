@@ -106,6 +106,10 @@ inline ElasticBand elastic_band;
 std::atomic<int> pending_reset_category{0};
 std::atomic<bool> scene_reset_requested{false};
 std::atomic<bool> dolly_reset_requested{false};
+std::atomic<bool> dolly_reset_has_pose{false};
+std::atomic<mjtNum> dolly_reset_x{0.0};
+std::atomic<mjtNum> dolly_reset_y{0.0};
+std::atomic<mjtNum> dolly_reset_yaw{0.0};
 
 class SceneResetSubscriber
 {
@@ -166,7 +170,40 @@ public:
 private:
   void messageHandler(const void *message)
   {
-    (void)message;
+    const auto *reset_message = static_cast<const String_t *>(message);
+    std::istringstream input(reset_message->data());
+    std::string command;
+    input >> command;
+    if (command == "pose")
+    {
+      mjtNum x = 0.0;
+      mjtNum y = 0.0;
+      mjtNum yaw = 0.0;
+      if (!(input >> x >> y >> yaw) || !std::isfinite(x) ||
+          !std::isfinite(y) || !std::isfinite(yaw))
+      {
+        std::cerr << "Ignoring invalid dolly reset pose: '"
+                  << reset_message->data() << "'" << std::endl;
+        return;
+      }
+      input >> std::ws;
+      if (!input.eof())
+      {
+        std::cerr << "Ignoring invalid dolly reset pose: '"
+                  << reset_message->data() << "'" << std::endl;
+        return;
+      }
+      dolly_reset_x.store(x, std::memory_order_relaxed);
+      dolly_reset_y.store(y, std::memory_order_relaxed);
+      dolly_reset_yaw.store(yaw, std::memory_order_relaxed);
+      dolly_reset_has_pose.store(true, std::memory_order_relaxed);
+    }
+    else
+    {
+      // Preserve the original contract: any non-pose message samples the
+      // reset pose from simulate/config.yaml.
+      dolly_reset_has_pose.store(false, std::memory_order_relaxed);
+    }
     dolly_reset_requested.store(true, std::memory_order_release);
   }
 
@@ -232,29 +269,6 @@ struct SceneResetPose
 {
   std::array<mjtNum, 3> position;
   mjtNum yaw;
-};
-
-bool collision_check(const SceneResetPose &sample_pose, int body_id ,mjData *data)
-{
-  
-
-  mjtNum x = sample_pose.position[0];
-  mjtNum y = sample_pose.position[1];
-
-  // World-frame XYZ position of the body's inertial frame / body frame.
-  const mjtNum* p = data->xpos + 3 * body_id;  
-  
-  // We assume a cylinder of radius 2.0
-  //
-  mjtNum rx = p[0];
-  mjtNum ry = p[1];
-
-  const mjtNum dx = x - rx;
-  const mjtNum dy = y - ry;
-
-  constexpr mjtNum radius = 2.0;
-  // std::cout << "Current distance:" << dx * dx + dy * dy << std::endl;
-  return dx * dx + dy * dy < radius * radius;
 };
 
 SceneResetPose SampleSceneResetPose()
@@ -411,10 +425,11 @@ void ResetBodyState(const mjModel *model, mjData *data, int body_id)
   mju_zero(data->xfrc_applied + 6 * body_id, 6);
 }
 
-bool ApplyDollyReset(mjModel *model, mjData *data)
+bool ApplyDollyReset(
+    mjModel *model, mjData *data, const SceneResetPose &pose)
 {
-  constexpr const char *dolly_body = "dolly";
-  const int body_id = mj_name2id(model, mjOBJ_BODY, dolly_body);
+  const std::string &dolly_body = param::config.scene_reset_body;
+  const int body_id = mj_name2id(model, mjOBJ_BODY, dolly_body.c_str());
   if (body_id < 0)
   {
     std::cerr << "Cannot reset dolly: MuJoCo body '" << dolly_body
@@ -425,17 +440,6 @@ bool ApplyDollyReset(mjModel *model, mjData *data)
   ResetBodyState(model, data, body_id);
   mj_forward(model, data);
 
-  SceneResetPose pose = SampleSceneResetPose();
-  const int robot_body_id = mj_name2id(model, mjOBJ_BODY, "torso_link");
-  if (robot_body_id < 0) {
-    throw std::runtime_error("torso_link body not found");
-  }
-  while (collision_check(pose, robot_body_id, data)){
-    pose = SampleSceneResetPose();
-    std::cout << "Dolly too close, sampling one more time" << std::endl;
-    std::cout << pose.position[0] << ","
-              << pose.position[1] << std::endl;
-  }
   if (!SetSceneBodyPose(model, data, body_id, pose))
   {
     std::cerr << "Cannot reset dolly: expected a mocap body, a free joint, or "
@@ -1392,7 +1396,14 @@ namespace
 
           if (dolly_reset_requested.exchange(false, std::memory_order_acquire))
           {
-            if (ApplyDollyReset(m, d))
+            SceneResetPose pose = SampleSceneResetPose();
+            if (dolly_reset_has_pose.exchange(false, std::memory_order_relaxed))
+            {
+              pose.position[0] = dolly_reset_x.load(std::memory_order_relaxed);
+              pose.position[1] = dolly_reset_y.load(std::memory_order_relaxed);
+              pose.yaw = dolly_reset_yaw.load(std::memory_order_relaxed);
+            }
+            if (ApplyDollyReset(m, d, pose))
             {
               sim.speed_changed = true;
             }

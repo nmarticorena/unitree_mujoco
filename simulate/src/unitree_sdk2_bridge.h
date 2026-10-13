@@ -73,6 +73,7 @@ public:
 protected:
     int num_motor_ = 0;
     int dim_motor_sensor_ = 0;
+    int motor_id_offset_ = 0;
 
     mjData *mj_data_;
     mjModel *mj_model_;
@@ -179,7 +180,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(lowcmd->mutex_);
             for(int i(0); i<num_motor_; i++) {
-                auto & m = lowcmd->msg_.motor_cmd()[i];
+                auto & m = lowcmd->msg_.motor_cmd()[i + motor_id_offset_];
                 mj_data_->ctrl[i] = m.tau() +
                                     m.kp() * (m.q() - mj_data_->sensordata[i]) +
                                     m.kd() * (m.dq() - mj_data_->sensordata[i + num_motor_]);
@@ -189,9 +190,10 @@ public:
         // lowstate
         if(lowstate->trylock()) {
             for(int i(0); i<num_motor_; i++) {
-                lowstate->msg_.motor_state()[i].q() = mj_data_->sensordata[i];
-                lowstate->msg_.motor_state()[i].dq() = mj_data_->sensordata[i + num_motor_];
-                lowstate->msg_.motor_state()[i].tau_est() = mj_data_->sensordata[i + 2 * num_motor_];
+                auto & motor_state = lowstate->msg_.motor_state()[i + motor_id_offset_];
+                motor_state.q() = mj_data_->sensordata[i];
+                motor_state.dq() = mj_data_->sensordata[i + num_motor_];
+                motor_state.tau_est() = mj_data_->sensordata[i + 2 * num_motor_];
             }
             
             if(imu_quat_adr_ >= 0) {
@@ -261,6 +263,13 @@ class G1Bridge : public RobotBridge<unitree::robot::g1::subscription::LowCmd, un
 public:
     G1Bridge(mjModel *model, mjData *data) : RobotBridge(model, data)
     {
+        const char* first_actuator = mj_id2name(mj_model_, mjOBJ_ACTUATOR, 0);
+        const std::string first_actuator_name = first_actuator ? first_actuator : "";
+        if (first_actuator_name.find("waist_pitch") != std::string::npos) {
+            motor_id_offset_ = 14;
+        } else if (first_actuator_name.find("left_shoulder_pitch") != std::string::npos) {
+            motor_id_offset_ = 15;
+        }
         if (param::config.robot.find("g1") != std::string::npos) {
             auto* g1_lowstate = dynamic_cast<unitree::robot::g1::publisher::LowState*>(lowstate.get());
             if (g1_lowstate) {

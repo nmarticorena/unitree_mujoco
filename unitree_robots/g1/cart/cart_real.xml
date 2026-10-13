@@ -41,8 +41,8 @@
       <geom size="0.0127 0.0190215" pos="0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 0.205 0.275" type="cylinder" />
-      <geom name="front_left_aruco_backing" size="0.055 0.055 0.005" pos="0.3 0.155 0.567" type="box" />
-      <geom name="front_left_aruco_geom" pos="0.3 0.155 0.567" type="mesh" contype="0" material="front_left_aruco_mat" mesh="front_left_aruco_mesh" />
+      <geom name="front_left_aruco_backing" size="0.055 0.055 0.005" pos="0.28 0.155 0.567" type="box" />
+      <geom name="front_left_aruco_geom" pos="0.28 0.155 0.567" type="mesh" contype="0" material="front_left_aruco_mat" mesh="front_left_aruco_mesh" />
       <geom name="front_middle_aruco_backing" size="0.055 0.055 0.005" pos="0.25 0 0.567" type="box" />
       <!-- <geom name="front_middle_aruco_geom" pos="0.25 0 0.567" type="mesh" contype="0" material="front_middle_aruco_mat" mesh="front_middle_aruco_mesh" /> -->
       <geom size="0.0127 0.01875" pos="0.35 0.205 0.56875" type="cylinder" />
@@ -51,13 +51,13 @@
       <geom size="0.0127 0.0190215" pos="0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
       <geom size="0.0127 0.0190215" pos="0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
       <geom size="0.0127 0.275" pos="0.35 -0.205 0.275" type="cylinder" />
-      <geom name="front_right_aruco_backing" size="0.055 0.055 0.005" pos="0.3 -0.155 0.567" type="box" />
-      <geom name="front_right_aruco_geom" pos="0.3 -0.155 0.567" type="mesh" contype="0" material="front_right_aruco_mat" mesh="front_right_aruco_mesh" />
+      <geom name="front_right_aruco_backing" size="0.055 0.055 0.005" pos="0.28 -0.155 0.567" type="box" />
+      <geom name="front_right_aruco_geom" pos="0.28 -0.155 0.567" type="mesh" contype="0" material="front_right_aruco_mat" mesh="front_right_aruco_mesh" />
       <geom size="0.0127 0.01875" pos="0.35 -0.205 0.56875" type="cylinder" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.28" type="box" />
       <geom size="0.35 0.205 0.017" pos="0 0 0.55" type="box" />
       <geom name="middle_aruco_backing" size="0.055 0.055 0.005" pos="0 0 0.572" type="box" />
-      <!-- <geom name="middle_aruco_geom" pos="0 0 0.572" type="mesh" contype="0" material="middle_aruco_mat" mesh="middle_aruco_mesh" /> -->
+      <geom name="middle_aruco_geom" pos="0 0 0.572" type="mesh" contype="0" material="middle_aruco_mat" mesh="middle_aruco_mesh" />
       <body name="back_left_wheel_caster" pos="-0.35 0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
 

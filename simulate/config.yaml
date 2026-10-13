@@ -22,11 +22,11 @@ elastic_band_topic: "rt/elastic_band" # std_msgs/msg/String: enable or disable
 enable_scene_reset: 1
 apply_scene_reset_on_startup: 1 # Apply scene_reset_pose immediately after loading the model
 scene_reset_topic: "rt/reset_category"
-dolly_reset_topic: "rt/reset_dolly" # Any std_msgs/msg/String message resets only the dolly
+dolly_reset_topic: "rt/reset_dolly" # "pose <x> <y> <yaw>" applies an exact pose; other strings use scene_reset_pose
 scene_reset_body: "bottom_plate"
 scene_reset_pose:
-  position: [0.4, 0.0, 0.]        # Fixed pose slightly in front of the robot [m]
-  position_margin: [0.0, 0.0, 0.0] # Uniform +/- margin on [x, y, z] [m]
+  position: [0.5, 0.0, 0.]          # Default pose; experiments send an explicit seeded pose
+  position_margin: [0.0, 0.0, 0.0] # Legacy non-pose reset messages use these margins
   yaw: 0.0                           # Centre yaw [rad]
   yaw_margin: 0.0                     # Uniform +/- yaw margin [rad]
 
@@ -49,10 +49,10 @@ publish_camera: 1 # Publish the MuJoCo camera as TeleImager-compatible JPEG over
 camera_name: "head_camera"
 camera_width: 640
 camera_height: 480
-camera_rate_hz: 15
+camera_rate_hz: 90
 camera_zmq_port: 55555
 camera_request_port: 60000
-camera_jpeg_quality: 85
+camera_jpeg_quality: 100
 
 # Start the interactive viewer in Tracking mode. This does not affect camera publishing.
 viewer_track_body: "fixed_torso_link"
