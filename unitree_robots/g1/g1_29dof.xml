@@ -229,6 +229,7 @@
               <geom name="d435i_debug"
                     type="box"
                     size="0.045 0.0125 0.0125"
+                    group="5"
                     rgba="0.1 0.3 1 0.6"
                     contype="0"
                     conaffinity="0"/>
@@ -238,6 +239,7 @@
                     type="capsule"
                     fromto="0 0 0 0 0 -0.30"
                     size="0.004"
+                    group="5"
                     rgba="1 0 0 1"
                     contype="0"
                     conaffinity="0"/>
@@ -245,6 +247,7 @@
               <site name="camera_origin"
                     type="sphere"
                     size="0.012"
+                    group="5"
                     rgba="0 1 0 1"/>
 
               <camera name="head_camera"
@@ -253,6 +256,23 @@
                       quat="1 0 0 0"
                       fovy="42"
                       resolution="1920 1080"
+                      output="rgb"/>
+            </body>
+            <!--
+              RealSense D435 left-IR optical pose from g1_29dof_d435.urdf.
+              The URDF optical frame is X-right, Y-down, Z-forward; this
+              quaternion includes the conversion to MuJoCo's camera axes
+              X-right, Y-up, -Z-forward.
+            -->
+            <body name="d435_infra1_mount"
+                  pos="0.0576235 0.01753 0.42987"
+                  quat="0.6592524821 0.2557071857 -0.2557071857 -0.6592524821">
+              <camera name="head_ir_camera"
+                      mode="fixed"
+                      pos="0 0 0"
+                      quat="1 0 0 0"
+                      fovy="58"
+                      resolution="848 480"
                       output="rgb"/>
             </body>
             <geom pos="0.0039635 0 -0.054" type="mesh" rgba="0.2 0.2 0.2 1" mesh="head_link" />

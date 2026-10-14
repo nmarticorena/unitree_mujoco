@@ -54,5 +54,15 @@ camera_zmq_port: 55555
 camera_request_port: 60000
 camera_jpeg_quality: 100
 
+# Simulated RealSense D435 left-infrared stream. TeleImager advertises this
+# under head_camera.enable_ir and publishes grayscale JPEGs on ir_zmq_port.
+publish_ir_camera: 1
+ir_camera_name: "head_ir_camera"
+ir_camera_width: 848
+ir_camera_height: 480
+ir_camera_rate_hz: 90
+ir_camera_zmq_port: 55556
+ir_camera_jpeg_quality: 100
+
 # Start the interactive viewer in Tracking mode. This does not affect camera publishing.
 viewer_track_body: "fixed_torso_link"

@@ -783,10 +783,24 @@ namespace
         : sim_(sim),
           render_window_(render_window)
     {
-      width_ = std::max(1, param::config.camera_width);
-      height_ = std::max(1, param::config.camera_height);
-      rate_hz_ = std::max(1, param::config.camera_rate_hz);
-      jpeg_quality_ = std::clamp(param::config.camera_jpeg_quality, 1, 100);
+      rgb_.enabled = param::config.publish_camera == 1;
+      rgb_.label = "RGB";
+      rgb_.name = param::config.camera_name;
+      rgb_.width = std::max(1, param::config.camera_width);
+      rgb_.height = std::max(1, param::config.camera_height);
+      rgb_.rate_hz = std::max(1, param::config.camera_rate_hz);
+      rgb_.zmq_port = param::config.camera_zmq_port;
+      rgb_.jpeg_quality = std::clamp(param::config.camera_jpeg_quality, 1, 100);
+
+      ir_.enabled = param::config.publish_ir_camera == 1;
+      ir_.grayscale = true;
+      ir_.label = "left infrared";
+      ir_.name = param::config.ir_camera_name;
+      ir_.width = std::max(1, param::config.ir_camera_width);
+      ir_.height = std::max(1, param::config.ir_camera_height);
+      ir_.rate_hz = std::max(1, param::config.ir_camera_rate_hz);
+      ir_.zmq_port = param::config.ir_camera_zmq_port;
+      ir_.jpeg_quality = std::clamp(param::config.ir_camera_jpeg_quality, 1, 100);
     }
 
     ~CameraZmqServer()
@@ -822,36 +836,34 @@ namespace
       glfwMakeContextCurrent(render_window_);
       mjv_defaultScene(&scene_);
       mjv_defaultOption(&option_);
+      // Visual group 5 is reserved for camera-pose diagnostics. Keep it in the
+      // interactive viewer, but never render its geoms or sites into streams.
+      option_.geomgroup[5] = 0;
+      option_.sitegroup[5] = 0;
       mjr_defaultContext(&context_);
 
       void *zmq_context = zmq_ctx_new();
-      void *publisher = zmq_context ? zmq_socket(zmq_context, ZMQ_PUB) : nullptr;
       void *responder = zmq_context ? zmq_socket(zmq_context, ZMQ_REP) : nullptr;
-      if (!zmq_context || !publisher || !responder)
+      if (!zmq_context || !responder || !openPublisher(zmq_context, rgb_) ||
+          !openPublisher(zmq_context, ir_))
       {
         std::cerr << "Camera ZMQ server failed to start: " << zmq_strerror(zmq_errno())
                   << std::endl;
-        closeZmq(zmq_context, publisher, responder);
+        closeZmq(zmq_context, responder);
         glfwMakeContextCurrent(nullptr);
         return;
       }
 
-      const int high_water_mark = 1;
       const int linger = 0;
-      zmq_setsockopt(publisher, ZMQ_SNDHWM, &high_water_mark, sizeof(high_water_mark));
-      zmq_setsockopt(publisher, ZMQ_LINGER, &linger, sizeof(linger));
       zmq_setsockopt(responder, ZMQ_LINGER, &linger, sizeof(linger));
 
-      const std::string publish_endpoint =
-          "tcp://*:" + std::to_string(param::config.camera_zmq_port);
       const std::string request_endpoint =
           "tcp://*:" + std::to_string(param::config.camera_request_port);
-      if (zmq_bind(publisher, publish_endpoint.c_str()) != 0 ||
-          zmq_bind(responder, request_endpoint.c_str()) != 0)
+      if (zmq_bind(responder, request_endpoint.c_str()) != 0)
       {
         std::cerr << "Camera ZMQ server failed to start: " << zmq_strerror(zmq_errno())
                   << std::endl;
-        closeZmq(zmq_context, publisher, responder);
+        closeZmq(zmq_context, responder);
         glfwMakeContextCurrent(nullptr);
         return;
       }
@@ -861,46 +873,108 @@ namespace
       {
         std::cerr << "Camera JPEG encoder failed to start: " << tjGetErrorStr()
                   << std::endl;
-        closeZmq(zmq_context, publisher, responder);
+        closeZmq(zmq_context, responder);
         glfwMakeContextCurrent(nullptr);
         return;
       }
 
-      std::cout << "Publishing MuJoCo camera '" << param::config.camera_name
-                << "' as JPEG on " << publish_endpoint << " at "
-                << width_ << "x" << height_ << " @ " << rate_hz_
-                << " Hz; configuration REP on " << request_endpoint << std::endl;
+      logStream(rgb_);
+      logStream(ir_);
+      std::cout << "Camera configuration REP on " << request_endpoint << std::endl;
 
-      const auto period = std::chrono::microseconds(1000000 / rate_hz_);
-      auto next_frame = std::chrono::steady_clock::now();
+      const auto start_time = std::chrono::steady_clock::now();
+      rgb_.next_frame = start_time;
+      ir_.next_frame = start_time;
       while (running_.load() && !sim_->exitrequest.load())
       {
         respondToConfigRequest(responder);
         const auto now = std::chrono::steady_clock::now();
-        if (now >= next_frame)
+        if (rgb_.enabled && now >= rgb_.next_frame)
         {
-          publishFrame(publisher);
-          next_frame = std::chrono::steady_clock::now() + period;
+          publishFrame(rgb_);
+          rgb_.next_frame = std::chrono::steady_clock::now() + framePeriod(rgb_);
         }
-        else
+        if (ir_.enabled && now >= ir_.next_frame)
         {
-          std::this_thread::sleep_until(
-              std::min(next_frame, now + std::chrono::milliseconds(10)));
+          publishFrame(ir_);
+          ir_.next_frame = std::chrono::steady_clock::now() + framePeriod(ir_);
         }
+
+        auto wake_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+        if (rgb_.enabled)
+        {
+          wake_time = std::min(wake_time, rgb_.next_frame);
+        }
+        if (ir_.enabled)
+        {
+          wake_time = std::min(wake_time, ir_.next_frame);
+        }
+        std::this_thread::sleep_until(wake_time);
       }
 
       releaseModelResources();
       tjDestroy(compressor_);
       compressor_ = nullptr;
-      closeZmq(zmq_context, publisher, responder);
+      closeZmq(zmq_context, responder);
       glfwMakeContextCurrent(nullptr);
     }
 
-    static void closeZmq(void *context, void *publisher, void *responder)
+    struct CameraStream
     {
-      if (publisher)
+      bool enabled = false;
+      bool grayscale = false;
+      std::string label;
+      std::string name;
+      int width = 1;
+      int height = 1;
+      int rate_hz = 1;
+      int zmq_port = 0;
+      int jpeg_quality = 85;
+      void *publisher = nullptr;
+      int camera_id = -1;
+      std::vector<unsigned char> raw_rgb;
+      std::vector<unsigned char> raw_gray;
+      unsigned char *jpeg_buffer = nullptr;
+      unsigned long jpeg_capacity = 0;
+      std::chrono::steady_clock::time_point next_frame;
+    };
+
+    static std::chrono::microseconds framePeriod(const CameraStream &stream)
+    {
+      return std::chrono::microseconds(1000000 / stream.rate_hz);
+    }
+
+    static bool openPublisher(void *context, CameraStream &stream)
+    {
+      if (!stream.enabled)
       {
-        zmq_close(publisher);
+        return true;
+      }
+
+      stream.publisher = zmq_socket(context, ZMQ_PUB);
+      if (!stream.publisher)
+      {
+        return false;
+      }
+
+      const int high_water_mark = 1;
+      const int linger = 0;
+      zmq_setsockopt(
+          stream.publisher, ZMQ_SNDHWM, &high_water_mark, sizeof(high_water_mark));
+      zmq_setsockopt(stream.publisher, ZMQ_LINGER, &linger, sizeof(linger));
+      const std::string endpoint = "tcp://*:" + std::to_string(stream.zmq_port);
+      return zmq_bind(stream.publisher, endpoint.c_str()) == 0;
+    }
+
+    void closeZmq(void *context, void *responder)
+    {
+      for (CameraStream *stream : {&rgb_, &ir_})
+      {
+        if (stream->publisher)
+        {
+          zmq_close(stream->publisher);
+          stream->publisher = nullptr;
+        }
       }
       if (responder)
       {
@@ -912,6 +986,19 @@ namespace
       }
     }
 
+    static void logStream(const CameraStream &stream)
+    {
+      if (!stream.enabled)
+      {
+        return;
+      }
+      std::cout << "Publishing MuJoCo " << stream.label << " camera '" << stream.name
+                << "' as " << (stream.grayscale ? "grayscale " : "")
+                << "JPEG on tcp://*:" << stream.zmq_port << " at " << stream.width
+                << "x" << stream.height << " @ " << stream.rate_hz << " Hz"
+                << std::endl;
+    }
+
     void respondToConfigRequest(void *responder) const
     {
       char request[32];
@@ -921,14 +1008,17 @@ namespace
       }
 
       std::ostringstream json;
+      const CameraStream &primary = rgb_.enabled ? rgb_ : ir_;
       json << "{\"head_camera\":{"
-           << "\"enable_zmq\":true,"
-           << "\"zmq_port\":" << param::config.camera_zmq_port << ","
+           << "\"enable_zmq\":" << (rgb_.enabled ? "true" : "false") << ","
+           << "\"zmq_port\":" << rgb_.zmq_port << ","
            << "\"enable_webrtc\":false,"
            << "\"type\":\"mujoco\","
-           << "\"image_shape\":[" << height_ << "," << width_ << "],"
+           << "\"image_shape\":[" << primary.height << "," << primary.width << "],"
            << "\"binocular\":false,"
-           << "\"fps\":" << rate_hz_ << "},"
+           << "\"fps\":" << primary.rate_hz << ","
+           << "\"enable_ir\":" << (ir_.enabled ? "true" : "false") << ","
+           << "\"ir_zmq_port\":" << ir_.zmq_port << "},"
            << "\"left_wrist_camera\":{\"enable_zmq\":false,\"enable_webrtc\":false},"
            << "\"right_wrist_camera\":{\"enable_zmq\":false,\"enable_webrtc\":false}}";
       const std::string response = json.str();
@@ -939,18 +1029,26 @@ namespace
     {
       if (model == model_)
       {
-        return camera_id_ >= 0;
+        return (!rgb_.enabled || rgb_.camera_id >= 0) &&
+               (!ir_.enabled || ir_.camera_id >= 0);
       }
 
       releaseModelResources();
       model_ = model;
 
-      camera_id_ = mj_name2id(model, mjOBJ_CAMERA, param::config.camera_name.c_str());
-      if (camera_id_ < 0)
+      for (CameraStream *stream : {&rgb_, &ir_})
       {
-        std::cerr << "Camera publisher disabled for loaded model: MuJoCo camera '"
-                  << param::config.camera_name << "' was not found" << std::endl;
-        return false;
+        if (!stream->enabled)
+        {
+          continue;
+        }
+        stream->camera_id = mj_name2id(model, mjOBJ_CAMERA, stream->name.c_str());
+        if (stream->camera_id < 0)
+        {
+          std::cerr << "Camera publisher disabled for loaded model: MuJoCo camera '"
+                    << stream->name << "' was not found" << std::endl;
+          return false;
+        }
       }
 
       mjv_makeScene(model, &scene_, mj::Simulate::kMaxGeom);
@@ -958,13 +1056,35 @@ namespace
 
       mjr_makeContext(model, &context_, mjFONTSCALE_150);
       context_ready_ = true;
-      mjr_resizeOffscreen(width_, height_, &context_);
+      const int framebuffer_width = std::max(rgb_.enabled ? rgb_.width : 1,
+                                             ir_.enabled ? ir_.width : 1);
+      const int framebuffer_height = std::max(rgb_.enabled ? rgb_.height : 1,
+                                              ir_.enabled ? ir_.height : 1);
+      mjr_resizeOffscreen(framebuffer_width, framebuffer_height, &context_);
       mjr_setBuffer(mjFB_OFFSCREEN, &context_);
-      raw_rgb_.resize(static_cast<size_t>(width_) * height_ * 3);
-      jpeg_capacity_ = tjBufSize(width_, height_, TJSAMP_420);
-      jpeg_buffer_ = tjAlloc(jpeg_capacity_);
 
-      return jpeg_buffer_ != nullptr;
+      for (CameraStream *stream : {&rgb_, &ir_})
+      {
+        if (!stream->enabled)
+        {
+          continue;
+        }
+        stream->raw_rgb.resize(static_cast<size_t>(stream->width) * stream->height * 3);
+        if (stream->grayscale)
+        {
+          stream->raw_gray.resize(static_cast<size_t>(stream->width) * stream->height);
+        }
+        const int subsampling = stream->grayscale ? TJSAMP_GRAY : TJSAMP_420;
+        stream->jpeg_capacity = tjBufSize(stream->width, stream->height, subsampling);
+        stream->jpeg_buffer = tjAlloc(stream->jpeg_capacity);
+        if (!stream->jpeg_buffer)
+        {
+          releaseModelResources();
+          return false;
+        }
+      }
+
+      return true;
     }
 
     void releaseModelResources()
@@ -980,15 +1100,21 @@ namespace
         scene_ready_ = false;
       }
       model_ = nullptr;
-      camera_id_ = -1;
-      if (jpeg_buffer_)
+      for (CameraStream *stream : {&rgb_, &ir_})
       {
-        tjFree(jpeg_buffer_);
-        jpeg_buffer_ = nullptr;
+        stream->camera_id = -1;
+        stream->raw_rgb.clear();
+        stream->raw_gray.clear();
+        if (stream->jpeg_buffer)
+        {
+          tjFree(stream->jpeg_buffer);
+          stream->jpeg_buffer = nullptr;
+        }
+        stream->jpeg_capacity = 0;
       }
     }
 
-    void publishFrame(void *publisher)
+    void publishFrame(CameraStream &stream)
     {
       {
         const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
@@ -1005,25 +1131,42 @@ namespace
         mjvCamera camera;
         mjv_defaultCamera(&camera);
         camera.type = mjCAMERA_FIXED;
-        camera.fixedcamid = camera_id_;
+        camera.fixedcamid = stream.camera_id;
 
-        const mjrRect viewport = {0, 0, width_, height_};
+        const mjrRect viewport = {0, 0, stream.width, stream.height};
         mjv_updateScene(m, d, &option_, nullptr, &camera, mjCAT_ALL, &scene_);
         mjr_setBuffer(mjFB_OFFSCREEN, &context_);
         mjr_render(viewport, &scene_, &context_);
-        mjr_readPixels(raw_rgb_.data(), nullptr, viewport, &context_);
+        mjr_readPixels(stream.raw_rgb.data(), nullptr, viewport, &context_);
       }
 
-      unsigned long jpeg_size = jpeg_capacity_;
-      if (tjCompress2(compressor_, raw_rgb_.data(), width_, 0, height_, TJPF_RGB,
-                      &jpeg_buffer_, &jpeg_size, TJSAMP_420, jpeg_quality_,
+      int pixel_format = TJPF_RGB;
+      int subsampling = TJSAMP_420;
+      unsigned char *pixels = stream.raw_rgb.data();
+      if (stream.grayscale)
+      {
+        for (size_t pixel = 0; pixel < stream.raw_gray.size(); ++pixel)
+        {
+          const size_t rgb = pixel * 3;
+          stream.raw_gray[pixel] = static_cast<unsigned char>(
+              (77 * stream.raw_rgb[rgb] + 150 * stream.raw_rgb[rgb + 1] +
+               29 * stream.raw_rgb[rgb + 2] + 128) >> 8);
+        }
+        pixels = stream.raw_gray.data();
+        pixel_format = TJPF_GRAY;
+        subsampling = TJSAMP_GRAY;
+      }
+
+      unsigned long jpeg_size = stream.jpeg_capacity;
+      if (tjCompress2(compressor_, pixels, stream.width, 0, stream.height, pixel_format,
+                      &stream.jpeg_buffer, &jpeg_size, subsampling, stream.jpeg_quality,
                       TJFLAG_BOTTOMUP | TJFLAG_FASTDCT | TJFLAG_NOREALLOC) != 0)
       {
-        std::cerr << "Camera JPEG encoding failed: " << tjGetErrorStr2(compressor_)
-                  << std::endl;
+        std::cerr << stream.label << " camera JPEG encoding failed: "
+                  << tjGetErrorStr2(compressor_) << std::endl;
         return;
       }
-      zmq_send(publisher, jpeg_buffer_, jpeg_size, ZMQ_DONTWAIT);
+      zmq_send(stream.publisher, stream.jpeg_buffer, jpeg_size, ZMQ_DONTWAIT);
     }
 
     mj::Simulate *sim_ = nullptr;
@@ -1031,27 +1174,21 @@ namespace
     std::atomic_bool running_{false};
     std::thread thread_;
     tjhandle compressor_ = nullptr;
-    unsigned char *jpeg_buffer_ = nullptr;
-    unsigned long jpeg_capacity_ = 0;
+    CameraStream rgb_;
+    CameraStream ir_;
 
     const mjModel *model_ = nullptr;
-    int camera_id_ = -1;
-    int width_ = 640;
-    int height_ = 480;
-    int rate_hz_ = 15;
-    int jpeg_quality_ = 85;
     bool scene_ready_ = false;
     bool context_ready_ = false;
 
     mjvScene scene_ = {};
     mjvOption option_ = {};
     mjrContext context_ = {};
-    std::vector<unsigned char> raw_rgb_;
   };
 
   GLFWwindow *CreateHiddenCameraWindow()
   {
-    if (param::config.publish_camera != 1)
+    if (param::config.publish_camera != 1 && param::config.publish_ir_camera != 1)
     {
       return nullptr;
     }
@@ -1606,7 +1743,7 @@ void UnitreeSdk2BridgeThread(mj::Simulate *sim, GLFWwindow *camera_window)
         std::make_unique<DollyResetSubscriber>(param::config.dolly_reset_topic);
   }
   std::unique_ptr<CameraZmqServer> camera_server;
-  if (param::config.publish_camera == 1)
+  if (param::config.publish_camera == 1 || param::config.publish_ir_camera == 1)
   {
     camera_server = std::make_unique<CameraZmqServer>(sim, camera_window);
     camera_server->start();

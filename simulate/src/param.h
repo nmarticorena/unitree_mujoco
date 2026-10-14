@@ -72,6 +72,13 @@ inline struct SimulationConfig
     int camera_zmq_port = 55555;
     int camera_request_port = 60000;
     int camera_jpeg_quality = 85;
+    int publish_ir_camera = 0;
+    std::string ir_camera_name = "head_ir_camera";
+    int ir_camera_width = 848;
+    int ir_camera_height = 480;
+    int ir_camera_rate_hz = 90;
+    int ir_camera_zmq_port = 55556;
+    int ir_camera_jpeg_quality = 100;
     std::string viewer_track_body;
 
     void load_from_yaml(const std::string &filename)
@@ -195,6 +202,27 @@ inline struct SimulationConfig
             if (cfg["camera_jpeg_quality"]) {
                 camera_jpeg_quality = cfg["camera_jpeg_quality"].as<int>();
             }
+            if (cfg["publish_ir_camera"]) {
+                publish_ir_camera = cfg["publish_ir_camera"].as<int>();
+            }
+            if (cfg["ir_camera_name"]) {
+                ir_camera_name = cfg["ir_camera_name"].as<std::string>();
+            }
+            if (cfg["ir_camera_width"]) {
+                ir_camera_width = cfg["ir_camera_width"].as<int>();
+            }
+            if (cfg["ir_camera_height"]) {
+                ir_camera_height = cfg["ir_camera_height"].as<int>();
+            }
+            if (cfg["ir_camera_rate_hz"]) {
+                ir_camera_rate_hz = cfg["ir_camera_rate_hz"].as<int>();
+            }
+            if (cfg["ir_camera_zmq_port"]) {
+                ir_camera_zmq_port = cfg["ir_camera_zmq_port"].as<int>();
+            }
+            if (cfg["ir_camera_jpeg_quality"]) {
+                ir_camera_jpeg_quality = cfg["ir_camera_jpeg_quality"].as<int>();
+            }
             if (cfg["viewer_track_body"]) {
                 viewer_track_body = cfg["viewer_track_body"].as<std::string>();
             }
@@ -246,6 +274,13 @@ inline po::variables_map helper(int argc, char** argv)
         ("camera_zmq_port", po::value<int>(&config.camera_zmq_port), "ZMQ JPEG PUB port")
         ("camera_request_port", po::value<int>(&config.camera_request_port), "TeleImager configuration REP port")
         ("camera_jpeg_quality", po::value<int>(&config.camera_jpeg_quality), "JPEG quality from 1 to 100")
+        ("publish_ir_camera", po::value<int>(&config.publish_ir_camera), "Publish the simulated RealSense left-infrared stream through ZMQ; 0 or 1")
+        ("ir_camera_name", po::value<std::string>(&config.ir_camera_name), "MuJoCo infrared camera name to render")
+        ("ir_camera_width", po::value<int>(&config.ir_camera_width), "Infrared camera render width")
+        ("ir_camera_height", po::value<int>(&config.ir_camera_height), "Infrared camera render height")
+        ("ir_camera_rate_hz", po::value<int>(&config.ir_camera_rate_hz), "Infrared camera publishing rate in Hz")
+        ("ir_camera_zmq_port", po::value<int>(&config.ir_camera_zmq_port), "Infrared grayscale JPEG PUB port")
+        ("ir_camera_jpeg_quality", po::value<int>(&config.ir_camera_jpeg_quality), "Infrared JPEG quality from 1 to 100")
         ("viewer_track_body", po::value<std::string>(&config.viewer_track_body), "MuJoCo body tracked by the viewer camera")
     ;
 
