@@ -1,6 +1,6 @@
 <mujoco model="g1_29dof scene with dolly">
   <include file="g1_29dof_lego_hands.xml"/>
-  <include file="cart/cart_real.xml"/>
+  <include file="cart/cart_real_v2.xml"/>
 
   <statistic center="0 0 0.5" extent="2.0"/>
 
