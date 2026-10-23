@@ -1364,6 +1364,137 @@ namespace
 
   //------------------------------------------- simulation -------------------------------------------
 
+  // Override the sliding friction of the foot collision geoms. MuJoCo uses the
+  // max friction of a contact pair unless one geom has higher priority, so the
+  // feet are bumped above everything else to make the value take effect.
+  void ApplyFootFriction(mjModel *model)
+  {
+    const double friction = param::config.foot_friction;
+    if (friction < 0)
+    {
+      return;
+    }
+
+    int max_priority = 0;
+    for (int i = 0; i < model->ngeom; ++i)
+    {
+      max_priority = std::max(max_priority, model->geom_priority[i]);
+    }
+
+    for (const auto &body_name : param::config.foot_bodies)
+    {
+      const int body_id = mj_name2id(model, mjOBJ_BODY, body_name.c_str());
+      if (body_id < 0)
+      {
+        std::cerr << "foot_friction: body '" << body_name << "' was not found" << std::endl;
+        continue;
+      }
+
+      int count = 0;
+      for (int i = 0; i < model->ngeom; ++i)
+      {
+        if (model->geom_bodyid[i] != body_id ||
+            (model->geom_contype[i] == 0 && model->geom_conaffinity[i] == 0))
+        {
+          continue;
+        }
+        model->geom_friction[3 * i] = friction;
+        model->geom_priority[i] = max_priority + 1;
+        ++count;
+      }
+      std::cout << "foot_friction: set " << count << " geoms on '" << body_name
+                << "' to " << friction << std::endl;
+    }
+  }
+
+  // Change the height of the cart's top shelf. The vertical posts (cylinders
+  // standing on the bottom plate) are resized, everything mounted at or above
+  // the top shelf (shelf, handles, arucos) is shifted with it, and the
+  // intermediate shelves are scaled proportionally. Wheels are child bodies
+  // below the bottom plate and are left untouched.
+  void ApplyCartHeight(mjModel *model)
+  {
+    const double target_top = param::config.cart_top_shelf_height;
+    if (target_top <= 0)
+    {
+      return;
+    }
+
+    const auto &body_name = param::config.cart_body;
+    const int body_id = mj_name2id(model, mjOBJ_BODY, body_name.c_str());
+    if (body_id < 0)
+    {
+      std::cerr << "cart_top_shelf_height: body '" << body_name << "' was not found" << std::endl;
+      return;
+    }
+
+    // Posts: upright cylinders whose bottom sits on the bottom plate.
+    auto is_post = [&](int i)
+    {
+      const mjtNum *q = model->geom_quat + 4 * i;
+      const mjtNum z = model->geom_pos[3 * i + 2];
+      const mjtNum half = model->geom_size[3 * i + 1];
+      return model->geom_type[i] == mjGEOM_CYLINDER && std::abs(q[0]) > 0.9999 &&
+             std::abs(z - half) < 0.02;
+    };
+
+    double ref_top = 0;
+    std::vector<int> geoms;
+    for (int i = 0; i < model->ngeom; ++i)
+    {
+      if (model->geom_bodyid[i] != body_id)
+      {
+        continue;
+      }
+      geoms.push_back(i);
+      if (is_post(i))
+      {
+        ref_top = std::max(ref_top, model->geom_pos[3 * i + 2] + model->geom_size[3 * i + 1]);
+      }
+    }
+    if (ref_top <= 0)
+    {
+      std::cerr << "cart_top_shelf_height: no posts found on '" << body_name << "'" << std::endl;
+      return;
+    }
+
+    const double scale = target_top / ref_top;
+    const double delta = target_top - ref_top;
+    // Markers hang a few cm below the top shelf; treat them as part of it.
+    const double top_band = ref_top - 0.06;
+
+    for (const int i : geoms)
+    {
+      mjtNum &z = model->geom_pos[3 * i + 2];
+      if (is_post(i))
+      {
+        mjtNum &half = model->geom_size[3 * i + 1];
+        half *= scale;
+        z *= scale;
+        model->geom_aabb[6 * i + 5] = half;
+        const mjtNum r = model->geom_size[3 * i];
+        model->geom_rbound[i] = std::sqrt(r * r + half * half);
+      }
+      else if (z >= top_band)
+      {
+        z += delta;
+      }
+      else if (z > 0)
+      {
+        z *= scale;
+      }
+    }
+    model->body_ipos[3 * body_id + 2] *= scale;
+
+    // Recompute derived constants (subtree COM, invweight0, ...).
+    mjData *data = mj_makeData(model);
+    mj_setConst(model, data);
+    mj_deleteData(data);
+
+    std::cout << "cart_top_shelf_height: '" << body_name << "' top shelf " << ref_top
+              << " -> " << target_top << " m" << std::endl;
+  }
+
   mjModel *LoadModel(const char *file, mj::Simulate &sim)
   {
     // this copy is needed so that the mju::strlen call below compiles
@@ -1418,6 +1549,9 @@ namespace
       std::printf("Model compiled, but simulation warning (paused):\n  %s\n", loadError);
       sim.run = 0;
     }
+
+    ApplyFootFriction(mnew);
+    ApplyCartHeight(mnew);
 
     return mnew;
   }

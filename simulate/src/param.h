@@ -81,6 +81,12 @@ inline struct SimulationConfig
     int ir_camera_jpeg_quality = 100;
     std::string viewer_track_body;
 
+    double foot_friction = -1.0; // < 0 keeps the friction from the XML
+    std::vector<std::string> foot_bodies = {"left_ankle_roll_link", "right_ankle_roll_link"};
+
+    std::string cart_body = "bottom_plate";
+    double cart_top_shelf_height = -1.0; // <= 0 keeps the height from the XML
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -225,6 +231,18 @@ inline struct SimulationConfig
             }
             if (cfg["viewer_track_body"]) {
                 viewer_track_body = cfg["viewer_track_body"].as<std::string>();
+            }
+            if (cfg["foot_friction"]) {
+                foot_friction = cfg["foot_friction"].as<double>();
+            }
+            if (cfg["foot_bodies"]) {
+                foot_bodies = cfg["foot_bodies"].as<std::vector<std::string>>();
+            }
+            if (cfg["cart_body"]) {
+                cart_body = cfg["cart_body"].as<std::string>();
+            }
+            if (cfg["cart_top_shelf_height"]) {
+                cart_top_shelf_height = cfg["cart_top_shelf_height"].as<double>();
             }
             if (cfg["object_pose_publishers"]) {
                 object_pose_publishers.clear();
