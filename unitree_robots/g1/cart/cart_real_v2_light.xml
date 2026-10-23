@@ -1,0 +1,106 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="cart_example_light">
+  <compiler angle="radian" />
+  <asset>
+    <mesh name="front_left_aruco_mesh" file="aruco/front_left_aruco_marker.obj" />
+    <texture name="front_left_aruco_texture" type="2d" file="aruco/front_left_aruco_4x4_50_id1_rot90.png" />
+    <material name="front_left_aruco_mat" texture="front_left_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="front_middle_aruco_mesh" file="aruco/front_middle_aruco_marker.obj" />
+    <texture name="front_middle_aruco_texture" type="2d" file="aruco/front_middle_aruco_4x4_50_id2_rot90.png" />
+    <material name="front_middle_aruco_mat" texture="front_middle_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="front_right_aruco_mesh" file="aruco/front_right_aruco_marker.obj" />
+    <texture name="front_right_aruco_texture" type="2d" file="aruco/front_right_aruco_4x4_50_id3_rot90.png" />
+    <material name="front_right_aruco_mat" texture="front_right_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="middle_aruco_mesh" file="aruco/middle_aruco_marker.obj" />
+    <texture name="middle_aruco_texture" type="2d" file="aruco/middle_aruco_4x4_50_id0_rot90.png" />
+    <material name="middle_aruco_mat" texture="middle_aruco_texture" texrepeat="1 1" texuniform="false" />
+    <mesh name="nav_aruco_mesh" file="aruco/nav_aruco_marker.obj" />
+    <texture name="nav_aruco_texture" type="2d" file="aruco/nav_aruco_4x4_50_id4_rot90.png" />
+    <material name="nav_aruco_mat" texture="nav_aruco_texture" texrepeat="1 1" texuniform="false" />
+  </asset>
+  <worldbody>
+    <body name="bottom_plate">
+      <inertial pos="0 0 0.39621" mass="10.0" diaginertia="0.809931 1.381031 1.034460" />
+      <joint name="cart_freejoint" type="free" />
+      <geom size="0.35 0.205 0.017" type="box" />
+      <geom name="back_handle_bar" size="0.0127 0.1075" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
+      <geom name="back_left_arc_0" size="0.0127 0.0190215" pos="-0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
+      <geom name="back_left_arc_1" size="0.0127 0.0190215" pos="-0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
+      <geom name="back_left_arc_2" size="0.0127 0.0190215" pos="-0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
+      <geom name="back_left_arc_3" size="0.0127 0.0190215" pos="-0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
+      <geom name="back_left_post" size="0.0127 0.275" pos="-0.35 0.205 0.275" type="cylinder" />
+      <geom name="back_left_support" size="0.0127 0.01875" pos="-0.35 0.205 0.56875" type="cylinder" />
+      <geom name="back_right_arc_0" size="0.0127 0.0190215" pos="-0.35 -0.201289 0.606156" quat="0.995185 -0.0980174 0 0" type="cylinder" />
+      <geom name="back_right_arc_1" size="0.0127 0.0190215" pos="-0.35 -0.187011 0.640627" quat="0.95694 -0.290285 0 0" type="cylinder" />
+      <geom name="back_right_arc_2" size="0.0127 0.0190215" pos="-0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
+      <geom name="back_right_arc_3" size="0.0127 0.0190215" pos="-0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
+      <geom name="back_right_post" size="0.0127 0.275" pos="-0.35 -0.205 0.275" type="cylinder" />
+      <geom name="back_right_support" size="0.0127 0.01875" pos="-0.35 -0.205 0.56875" type="cylinder" />
+      <geom name="front_handle_bar" size="0.0127 0.1075" pos="0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
+      <geom name="front_left_arc_0" size="0.0127 0.0190215" pos="0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
+      <geom name="front_left_arc_1" size="0.0127 0.0190215" pos="0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
+      <geom name="front_left_arc_2" size="0.0127 0.0190215" pos="0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
+      <geom name="front_left_arc_3" size="0.0127 0.0190215" pos="0.35 0.126156 0.681289" quat="0.77301 0.634393 0 0" type="cylinder" />
+      <geom name="front_left_post" size="0.0127 0.275" pos="0.35 0.205 0.275" type="cylinder" />
+      <geom name="front_left_aruco_backing" size="0.055 0.055 0.005" pos="0.25 0.155 0.567" type="box" mass="0" />
+      <geom name="front_left_aruco_geom" pos="0.25 0.155 0.567" type="mesh" contype="0" mass="0" material="front_left_aruco_mat" mesh="front_left_aruco_mesh" />
+      <geom name="front_middle_aruco_backing" size="0.055 0.055 0.005" pos="0.25 0 0.567" type="box" mass="0" />
+      <geom name="front_middle_aruco_geom" pos="0.25 0 0.567" type="mesh" contype="0" mass="0" material="front_middle_aruco_mat" mesh="front_middle_aruco_mesh" />
+      <geom name="front_left_support" size="0.0127 0.01875" pos="0.35 0.205 0.56875" type="cylinder" />
+      <geom name="front_right_arc_0" size="0.0127 0.0190215" pos="0.35 -0.201289 0.606156" quat="0.995185 -0.0980174 0 0" type="cylinder" />
+      <geom name="front_right_arc_1" size="0.0127 0.0190215" pos="0.35 -0.187011 0.640627" quat="0.95694 -0.290285 0 0" type="cylinder" />
+      <geom name="front_right_arc_2" size="0.0127 0.0190215" pos="0.35 -0.160627 0.667011" quat="0.881921 -0.471397 0 0" type="cylinder" />
+      <geom name="front_right_arc_3" size="0.0127 0.0190215" pos="0.35 -0.126156 0.681289" quat="0.77301 -0.634393 0 0" type="cylinder" />
+      <geom name="front_right_post" size="0.0127 0.275" pos="0.35 -0.205 0.275" type="cylinder" />
+      <geom name="front_right_aruco_backing" size="0.055 0.055 0.005" pos="0.25 -0.155 0.567" type="box" mass="0" />
+      <geom name="front_right_aruco_geom" pos="0.25 -0.155 0.567" type="mesh" contype="0" mass="0" material="front_right_aruco_mat" mesh="front_right_aruco_mesh" />
+      <geom name="front_right_support" size="0.0127 0.01875" pos="0.35 -0.205 0.56875" type="cylinder" />
+      <geom size="0.35 0.205 0.017" pos="0 0 0.28" type="box" />
+      <geom size="0.35 0.205 0.017" pos="0 0 0.55" type="box" />
+      <geom name="middle_aruco_backing" size="0.055 0.055 0.005" pos="0 0 0.572" type="box" mass="0" />
+      <geom name="middle_aruco_geom" pos="0 0 0.572" type="mesh" contype="0" mass="0" material="middle_aruco_mat" mesh="middle_aruco_mesh" />
+      <geom name="nav_aruco_backing" size="0.055 0.055 0.005" pos="-0.355 0 0.517" quat="0.707107 0 -0.707107 0" type="box" mass="0" />
+      <geom name="nav_aruco_geom" pos="-0.355 0 0.517" quat="0.707107 0 -0.707107 0" type="mesh" contype="0" mass="0" material="nav_aruco_mat" mesh="nav_aruco_mesh" />
+      <body name="back_left_wheel_caster" pos="-0.35 0.205 -0.04">
+        <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
+        <joint name="back_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.0005" />
+        <geom size="0.02 0.01" type="cylinder" />
+        <body name="back_left_wheel_wheel" pos="0.05 0 -0.07">
+          <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.3" diaginertia="0.000375 0.000228 0.000228" />
+          <joint name="back_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.00001" frictionloss="0.00001" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.002 0.0001" />
+        </body>
+      </body>
+      <body name="back_right_wheel_caster" pos="-0.35 -0.205 -0.04">
+        <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
+        <joint name="back_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.0005" />
+        <geom size="0.02 0.01" type="cylinder" />
+        <body name="back_right_wheel_wheel" pos="0.05 0 -0.07">
+          <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.3" diaginertia="0.000375 0.000228 0.000228" />
+          <joint name="back_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.00001" frictionloss="0.00001" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.002 0.0001" />
+        </body>
+      </body>
+      <body name="front_left_wheel_caster" pos="0.35 0.205 -0.04">
+        <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
+        <joint name="front_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.0005" />
+        <geom size="0.02 0.01" type="cylinder" />
+        <body name="front_left_wheel_wheel" pos="0.05 0 -0.07">
+          <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.3" diaginertia="0.000375 0.000228 0.000228" />
+          <joint name="front_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.00001" frictionloss="0.00001" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.002 0.0001" />
+        </body>
+      </body>
+      <body name="front_right_wheel_caster" pos="0.35 -0.205 -0.04">
+        <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
+        <joint name="front_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.0005" />
+        <geom size="0.02 0.01" type="cylinder" />
+        <body name="front_right_wheel_wheel" pos="0.05 0 -0.07">
+          <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.3" diaginertia="0.000375 0.000228 0.000228" />
+          <joint name="front_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.00001" frictionloss="0.00001" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.002 0.0001" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

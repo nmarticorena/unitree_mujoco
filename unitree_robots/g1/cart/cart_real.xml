@@ -20,10 +20,16 @@
   </asset>
   <worldbody>
     <body name="bottom_plate">
-      <inertial pos="0.143103 0 0.253107" quat="0.351275 0.613682 0.613682 0.351275" mass="5.80001" diaginertia="1.22116 0.985497 0.504418" />
+      <!-- <inertial pos="0.143103 0 0.253107" quat="0.351275 0.613682 0.613682 0.351275" mass="5.80001" diaginertia="1.22116 0.985497 0.504418" /> -->
+      <inertial
+    pos="0.143103 0 0.253107"
+    quat="0.351275 0.613682 0.613682 0.351275"
+    mass="3.0"
+    diaginertia=".631633 .509739 .260905" />
+
       <joint name="cart_freejoint" type="free" />
       <geom size="0.35 0.205 0.017" type="box" />
-      <geom name="back_handle_bar" size="0.0127 0.1075" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
+      <geom name="back_handle_bar" size="0.0027 0.1075" pos="-0.35 0 0.685" quat="0.707107 0.707107 0 0" type="cylinder" />
       <geom name="back_left_arc_0" size="0.0127 0.0190215" pos="-0.35 0.201289 0.606156" quat="0.995185 0.0980174 0 0" type="cylinder" />
       <geom name="back_left_arc_1" size="0.0127 0.0190215" pos="-0.35 0.187011 0.640627" quat="0.95694 0.290285 0 0" type="cylinder" />
       <geom name="back_left_arc_2" size="0.0127 0.0190215" pos="-0.35 0.160627 0.667011" quat="0.881921 0.471397 0 0" type="cylinder" />
@@ -63,42 +69,42 @@
       <geom name="nav_aruco_geom" pos="-0.355 0 0.517" quat="0.707107 0 -0.707107 0" type="mesh" contype="0" material="nav_aruco_mat" mesh="nav_aruco_mesh" />
       <body name="back_left_wheel_caster" pos="-0.35 0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
-        <joint name="back_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.02" frictionloss="0.01" />
+        <joint name="back_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.2" frictionloss="0.05" />
         <geom size="0.02 0.01" type="cylinder" />
         <body name="back_left_wheel_wheel" pos="0.05 0 -0.07">
           <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.2" diaginertia="0.00025 0.000152 0.000152" />
-          <joint name="back_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.01" />
-          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.005 0.0005" />
+          <joint name="back_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.0005" frictionloss="0.0005" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.8 0.005 0.0005" />
         </body>
       </body>
       <body name="back_right_wheel_caster" pos="-0.35 -0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
-        <joint name="back_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.02" frictionloss="0.01" />
+        <joint name="back_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.2" frictionloss="0.05" />
         <geom size="0.02 0.01" type="cylinder" />
         <body name="back_right_wheel_wheel" pos="0.05 0 -0.07">
           <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.2" diaginertia="0.00025 0.000152 0.000152" />
-          <joint name="back_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.01" />
-          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.005 0.0005" />
+          <joint name="back_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.0005" frictionloss="0.0005" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.8 0.005 0.0005" />
         </body>
       </body>
       <body name="front_left_wheel_caster" pos="0.35 0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
-        <joint name="front_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.02" frictionloss="0.01" />
+        <joint name="front_left_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.2" frictionloss="0.05" />
         <geom size="0.02 0.01" type="cylinder" />
         <body name="front_left_wheel_wheel" pos="0.05 0 -0.07">
           <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.2" diaginertia="0.00025 0.000152 0.000152" />
-          <joint name="front_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.01" />
-          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.005 0.0005" />
+          <joint name="front_left_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.0005" frictionloss="0.0005" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.8 0.005 0.0005" />
         </body>
       </body>
       <body name="front_right_wheel_caster" pos="0.35 -0.205 -0.04">
         <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.1" diaginertia="2e-05 1.3e-05 1.3e-05" />
-        <joint name="front_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.02" frictionloss="0.01" />
+        <joint name="front_right_wheel_joint_0" pos="0 0 0" axis="0 0 1" actuatorfrcrange="-10 10" damping="0.2" frictionloss="0.05" />
         <geom size="0.02 0.01" type="cylinder" />
         <body name="front_right_wheel_wheel" pos="0.05 0 -0.07">
           <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="0.2" diaginertia="0.00025 0.000152 0.000152" />
-          <joint name="front_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.001" frictionloss="0.01" />
-          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.5 0.005 0.0005" />
+          <joint name="front_right_wheel_joint_1" pos="0 0 0" axis="0 1 0" limited="false" actuatorfrcrange="-10 10" damping="0.0005" frictionloss="0.0005" />
+          <geom size="0.05 0.02" quat="0.707107 0.707107 0 0" type="cylinder" condim="6" friction="0.8 0.005 0.0005" />
         </body>
       </body>
     </body>
