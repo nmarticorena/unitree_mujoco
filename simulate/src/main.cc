@@ -935,9 +935,24 @@ namespace
       std::vector<unsigned char> raw_rgb;
       std::vector<unsigned char> raw_gray;
       unsigned char *jpeg_buffer = nullptr;
-      unsigned long jpeg_capacity = 0;
+      unsigned long jpeg_capacity = 0;  // JPEG bytes; jpeg_buffer has kFrameTrailerSize more
+      uint64_t seq = 0;
       std::chrono::steady_clock::time_point next_frame;
     };
+
+    // teleimager frame trailer, appended after the JPEG end-of-image marker so
+    // clients that do not read it still decode the image: little-endian int64
+    // capture time (ns since the Unix epoch, Python's time.time_ns()), uint64
+    // per-stream sequence number, then "TIMG".
+    static constexpr size_t kFrameTrailerSize = 20;
+
+    static void writeFrameTrailer(unsigned char *out, int64_t capture_time_ns, uint64_t seq)
+    {
+      static_assert(sizeof(capture_time_ns) == 8 && sizeof(seq) == 8);
+      std::memcpy(out, &capture_time_ns, 8);  // little-endian host (x86-64, aarch64)
+      std::memcpy(out + 8, &seq, 8);
+      std::memcpy(out + 16, "TIMG", 4);
+    }
 
     static std::chrono::microseconds framePeriod(const CameraStream &stream)
     {
@@ -1076,7 +1091,7 @@ namespace
         }
         const int subsampling = stream->grayscale ? TJSAMP_GRAY : TJSAMP_420;
         stream->jpeg_capacity = tjBufSize(stream->width, stream->height, subsampling);
-        stream->jpeg_buffer = tjAlloc(stream->jpeg_capacity);
+        stream->jpeg_buffer = tjAlloc(stream->jpeg_capacity + kFrameTrailerSize);
         if (!stream->jpeg_buffer)
         {
           releaseModelResources();
@@ -1116,6 +1131,7 @@ namespace
 
     void publishFrame(CameraStream &stream)
     {
+      int64_t capture_time_ns = 0;
       {
         const std::unique_lock<std::recursive_mutex> lock(sim_->mtx);
         if (!m || !d)
@@ -1138,6 +1154,9 @@ namespace
         mjr_setBuffer(mjFB_OFFSCREEN, &context_);
         mjr_render(viewport, &scene_, &context_);
         mjr_readPixels(stream.raw_rgb.data(), nullptr, viewport, &context_);
+        capture_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
       }
 
       int pixel_format = TJPF_RGB;
@@ -1166,7 +1185,8 @@ namespace
                   << tjGetErrorStr2(compressor_) << std::endl;
         return;
       }
-      zmq_send(stream.publisher, stream.jpeg_buffer, jpeg_size, ZMQ_DONTWAIT);
+      writeFrameTrailer(stream.jpeg_buffer + jpeg_size, capture_time_ns, stream.seq++);
+      zmq_send(stream.publisher, stream.jpeg_buffer, jpeg_size + kFrameTrailerSize, ZMQ_DONTWAIT);
     }
 
     mj::Simulate *sim_ = nullptr;
